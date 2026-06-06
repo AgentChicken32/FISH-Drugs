@@ -229,6 +229,7 @@ class DrugRisk(BaseModel):
 class RegimeResponse(BaseModel):
     drugs: list[DrugRisk]
     total_risk: float
+    normalized_risk: float  # total_risk / number of drugs
     populated_edges: int
     possible_edges: int
     coverage_pct: float
@@ -285,6 +286,8 @@ def regime_risk(req: RegimeRequest):
             ))
 
         total_risk = sum(d.risk for d in drug_risks)
+        n = len(drug_risks)
+        normalized_risk = total_risk / n if n > 0 else 0.0
 
         # Coverage: check all unique pairs
         ids = [d.id for d in drug_risks]
@@ -296,6 +299,7 @@ def regime_risk(req: RegimeRequest):
         return RegimeResponse(
             drugs=drug_risks,
             total_risk=total_risk,
+            normalized_risk=round(normalized_risk, 6),  # ← add this line
             populated_edges=populated,
             possible_edges=possible,
             coverage_pct=round(coverage, 1),

@@ -456,9 +456,9 @@ export default function App() {
             {/* Score cards */}
             <div className="score-banner">
               <div className="score-card primary">
-                <label>Total Regime Risk</label>
-                <div className="value">{result.total_risk.toFixed(3)}</div>
-                <div className="sub">sum of drug risks</div>
+                <label>Regime Risk</label>
+                <div className="value">{result.normalized_risk.toFixed(3)}</div>
+                <div className="sub">avg drug risk · {result.drugs.length} drugs</div>
               </div>
               <div className="score-card">
                 <label>DB Coverage</label>
