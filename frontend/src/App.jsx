@@ -234,6 +234,53 @@ const css = `
   .risk-bar { width: 80px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
   .risk-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
 
+  /* Section title */
+  .section-title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: 28px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Pair scores table */
+  .pair-table { width: 100%; border-collapse: collapse; }
+  .pair-table th {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .pair-table th.right { text-align: right; }
+  .pair-table td {
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .pair-table tr:last-child td { border-bottom: none; }
+  .pair-table tr:hover td { background: #15181f; }
+  .pair-names { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .pair-sep { color: var(--muted); font-size: 0.75rem; font-weight: 400; }
+
+  /* Match score pill */
+  .match-cell { text-align: right; white-space: nowrap; }
+  .match-wrap { display: inline-flex; align-items: center; gap: 8px; }
+  .match-bar { width: 60px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .match-bar-fill { height: 100%; border-radius: 2px; }
+  .match-pct {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    min-width: 44px;
+    text-align: right;
+  }
+
   /* Unknown drugs */
   .unknown-box {
     margin-top: 16px;
@@ -277,6 +324,12 @@ function riskColor(val, max) {
   return "#f87171";
 }
 
+function matchColor(score) {
+  if (score >= 0.66) return "#4ade80";
+  if (score >= 0.33) return "#fb923c";
+  return "#f87171";
+}
+
 function useDebounce(value, delay) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -288,7 +341,7 @@ function useDebounce(value, delay) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function App() {
-  const [drugs, setDrugs]         = useState([]);   // [{id, name}]
+  const [drugs, setDrugs]         = useState([]);
   const [query, setQuery]         = useState("");
   const [suggestions, setSuggs]   = useState([]);
   const [activeIdx, setActiveIdx] = useState(-1);
@@ -301,7 +354,6 @@ export default function App() {
 
   const debouncedQ = useDebounce(query, 200);
 
-  // Health check on mount
   useEffect(() => {
     fetch(`${API_BASE}/health`)
       .then(r => r.json())
@@ -309,7 +361,6 @@ export default function App() {
       .catch(() => setOnline(false));
   }, []);
 
-  // Autocomplete
   useEffect(() => {
     if (debouncedQ.length < 2) { setSuggs([]); return; }
     fetch(`${API_BASE}/search?q=${encodeURIComponent(debouncedQ)}&limit=8`)
@@ -342,10 +393,7 @@ export default function App() {
     else if (e.key === "Enter") {
       e.preventDefault();
       if (activeIdx >= 0 && suggestions[activeIdx]) addDrug(suggestions[activeIdx]);
-      else if (query.trim()) {
-        // add raw query, let backend resolve
-        addDrug({ id: query.trim(), name: query.trim() });
-      }
+      else if (query.trim()) addDrug({ id: query.trim(), name: query.trim() });
     }
     else if (e.key === "Backspace" && query === "" && drugs.length) {
       removeDrug(drugs[drugs.length - 1].id);
@@ -435,7 +483,6 @@ export default function App() {
           </span>
         </div>
 
-        {/* Loading */}
         {loading && (
           <div className="loading">
             <div className="spinner" />
@@ -443,10 +490,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Error */}
         {error && <div className="error-box">⚠ {error}</div>}
 
-        {/* Results */}
         {result && (
           <div className="results">
             <div className="results-header">
@@ -475,6 +520,7 @@ export default function App() {
             </div>
 
             {/* Per-drug table */}
+            <p className="section-title">Individual Drug Risk</p>
             <table className="drug-table">
               <thead>
                 <tr>
@@ -508,6 +554,54 @@ export default function App() {
                 ))}
               </tbody>
             </table>
+
+            {/* Pairwise matching scores */}
+            {result.pair_scores && result.pair_scores.length > 0 && (
+              <>
+                <p className="section-title">Pairwise Matching Scores</p>
+                <table className="pair-table">
+                  <thead>
+                    <tr>
+                      <th>Drug Pair</th>
+                      <th className="right">Matching Score</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.pair_scores.map((ps, i) => {
+                      const score = ps.score;
+                      const pct   = score !== null ? (score * 100).toFixed(1) : null;
+                      const color = score !== null ? matchColor(score) : "var(--muted)";
+                      return (
+                        <tr key={i}>
+                          <td>
+                            <div className="pair-names">
+                              <span>{ps.drug_a_name}</span>
+                              <span className="pair-sep">↔</span>
+                              <span>{ps.drug_b_name}</span>
+                            </div>
+                          </td>
+                          <td className="match-cell">
+                            {score !== null ? (
+                              <div className="match-wrap">
+                                <div className="match-bar">
+                                  <div
+                                    className="match-bar-fill"
+                                    style={{ width: `${score * 100}%`, background: color }}
+                                  />
+                                </div>
+                                <span className="match-pct" style={{ color }}>{pct}%</span>
+                              </div>
+                            ) : (
+                              <span className="no-data">no data</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </>
+            )}
 
             {/* Unknown drugs */}
             {result.unknown_drugs.length > 0 && (
