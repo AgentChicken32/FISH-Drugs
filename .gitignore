@@ -1,0 +1,30 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+
+# Database (rebuilt from CSV on each run)
+*.db
+
+# Frontend
+node_modules/
+dist/
+.DS_Store
+*.config.js
+*.html
+
+# VSCode
+.vscode/
+
+# Other unnecessary stuff
+*.json
+*.svg
+*.png
+*.css
+*.docx
+
+# no need to commit the interactions for now
+*.csv

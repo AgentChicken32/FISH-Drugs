@@ -1,0 +1,524 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+// ── Change this if your backend runs elsewhere ──────────────────────────────
+const API_BASE = "http://localhost:8000";
+
+// ── Palette & styles ─────────────────────────────────────────────────────────
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Syne:wght@400;500;600;700;800&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0d0f14;
+    --surface:  #13161e;
+    --border:   #222635;
+    --accent:   #4ade80;
+    --warn:     #fb923c;
+    --danger:   #f87171;
+    --muted:    #6b7280;
+    --text:     #e5e7eb;
+    --subtext:  #9ca3af;
+    --radius:   6px;
+    --mono:     'DM Mono', monospace;
+    --sans:     'Syne', sans-serif;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  .app {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  /* Header */
+  .header { margin-bottom: 48px; }
+  .header h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    color: #fff;
+  }
+  .header h1 span { color: var(--accent); }
+  .header p {
+    margin-top: 8px;
+    color: var(--subtext);
+    font-size: 0.875rem;
+    font-family: var(--mono);
+  }
+  .header-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 14px;
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    padding: 4px 12px;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+  .dot.online { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+  /* Search / tag input */
+  .input-area {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    transition: border-color 0.15s;
+    position: relative;
+  }
+  .input-area:focus-within { border-color: var(--accent); }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #1a2e1a;
+    border: 1px solid #2d5a2d;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    border-radius: 4px;
+    padding: 4px 8px;
+    animation: tagIn 0.15s ease;
+  }
+  @keyframes tagIn { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .tag button {
+    background: none; border: none; cursor: pointer;
+    color: #4b7c4b; font-size: 0.9rem; line-height: 1;
+    padding: 0; display: flex; align-items: center;
+    transition: color 0.1s;
+  }
+  .tag button:hover { color: var(--accent); }
+
+  .search-input {
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 0.875rem;
+    min-width: 180px;
+    flex: 1;
+  }
+  .search-input::placeholder { color: var(--muted); }
+
+  /* Autocomplete dropdown */
+  .dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0; right: 0;
+    background: #191c26;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    z-index: 100;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .dropdown-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+    font-size: 0.875rem;
+  }
+  .dropdown-item:hover, .dropdown-item.active { background: #222635; }
+  .dropdown-item .drug-name { font-weight: 600; }
+  .dropdown-item .drug-id { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); }
+
+  /* Actions */
+  .actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    align-items: center;
+  }
+  .btn {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 0.8rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border: none;
+    border-radius: var(--radius);
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #0a1a0a;
+  }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+  .hint { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); margin-left: auto; }
+
+  /* Results */
+  .results { margin-top: 36px; animation: fadeUp 0.3s ease; }
+  @keyframes fadeUp { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .results-header h2 { font-size: 0.7rem; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+
+  /* Score banner */
+  .score-banner {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .score-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+  }
+  .score-card.primary { border-color: var(--accent); background: #0d1f0d; }
+  .score-card label { font-family: var(--sans); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--subtext); display: block; margin-bottom: 10px; }
+  .score-card .value { font-family: var(--mono); font-size: 1.75rem; font-weight: 500; line-height: 1; color: var(--accent); letter-spacing: -0.02em; }
+  .score-card.primary .value { font-size: 2.2rem; }
+  .score-card .value.warn { color: var(--warn); }
+  .score-card .sub { font-family: var(--sans); font-size: 0.72rem; font-weight: 500; color: var(--muted); margin-top: 6px; }
+
+  /* Drug table */
+  .drug-table { width: 100%; border-collapse: collapse; }
+  .drug-table th {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .drug-table th:last-child { text-align: right; }
+  .drug-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+  }
+  .drug-table tr:last-child td { border-bottom: none; }
+  .drug-table td:last-child { text-align: right; font-family: var(--mono); }
+  .drug-id-cell { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+  .drug-name-cell { font-weight: 600; }
+  .no-data { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); font-style: italic; }
+
+  /* Risk bar */
+  .risk-bar-wrap { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+  .risk-bar { width: 80px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .risk-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+
+  /* Unknown drugs */
+  .unknown-box {
+    margin-top: 16px;
+    background: #1f1210;
+    border: 1px solid #4a1a1a;
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--danger);
+  }
+  .unknown-box strong { display: block; margin-bottom: 4px; }
+
+  /* Error / loading */
+  .error-box {
+    background: #1f1210; border: 1px solid #4a1a1a;
+    border-radius: var(--radius); padding: 16px 20px;
+    font-family: var(--mono); font-size: 0.8rem; color: var(--danger);
+    margin-top: 24px;
+  }
+  .loading {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 0.8rem; color: var(--muted);
+    margin-top: 24px;
+  }
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+`;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function riskColor(val, max) {
+  const ratio = max > 0 ? val / max : 0;
+  if (ratio < 0.33) return "#4ade80";
+  if (ratio < 0.66) return "#fb923c";
+  return "#f87171";
+}
+
+function useDebounce(value, delay) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+export default function App() {
+  const [drugs, setDrugs]         = useState([]);   // [{id, name}]
+  const [query, setQuery]         = useState("");
+  const [suggestions, setSuggs]   = useState([]);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [result, setResult]       = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState(null);
+  const [online, setOnline]       = useState(null);
+  const [dbCount, setDbCount]     = useState(null);
+  const inputRef = useRef(null);
+
+  const debouncedQ = useDebounce(query, 200);
+
+  // Health check on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/health`)
+      .then(r => r.json())
+      .then(d => { setOnline(true); setDbCount(d.interactions); })
+      .catch(() => setOnline(false));
+  }, []);
+
+  // Autocomplete
+  useEffect(() => {
+    if (debouncedQ.length < 2) { setSuggs([]); return; }
+    fetch(`${API_BASE}/search?q=${encodeURIComponent(debouncedQ)}&limit=8`)
+      .then(r => r.json())
+      .then(data => {
+        const filtered = data.filter(s => !drugs.some(d => d.id === s.id));
+        setSuggs(filtered);
+        setActiveIdx(-1);
+      })
+      .catch(() => setSuggs([]));
+  }, [debouncedQ, drugs]);
+
+  const addDrug = useCallback((drug) => {
+    if (drugs.some(d => d.id === drug.id)) return;
+    setDrugs(prev => [...prev, drug]);
+    setQuery("");
+    setSuggs([]);
+    setResult(null);
+    inputRef.current?.focus();
+  }, [drugs]);
+
+  const removeDrug = (id) => {
+    setDrugs(prev => prev.filter(d => d.id !== id));
+    setResult(null);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, suggestions.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, -1)); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIdx >= 0 && suggestions[activeIdx]) addDrug(suggestions[activeIdx]);
+      else if (query.trim()) {
+        // add raw query, let backend resolve
+        addDrug({ id: query.trim(), name: query.trim() });
+      }
+    }
+    else if (e.key === "Backspace" && query === "" && drugs.length) {
+      removeDrug(drugs[drugs.length - 1].id);
+    }
+  };
+
+  const calculate = async () => {
+    if (drugs.length === 0) return;
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/regime/risk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ drug_ids: drugs.map(d => d.id) }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      setResult(await res.json());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); };
+
+  const maxRisk = result ? Math.max(...result.drugs.map(d => d.risk), 0.001) : 1;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div className="app">
+        {/* Header */}
+        <div className="header">
+          <h1>Drug Regime<br /><span>Risk Scorer</span></h1>
+          <p>Add drugs to a regime and assess interaction risk</p>
+          <div className="header-status">
+            <span className={`dot${online ? " online" : ""}`} />
+            {online === null ? "connecting…"
+              : online ? `${dbCount?.toLocaleString() ?? "…"} interactions loaded`
+              : "backend offline — start uvicorn on :8000"}
+          </div>
+        </div>
+
+        {/* Drug input */}
+        <div className="input-area" onClick={() => inputRef.current?.focus()}>
+          {drugs.map(d => (
+            <span key={d.id} className="tag">
+              {d.name}
+              <button onClick={(e) => { e.stopPropagation(); removeDrug(d.id); }} aria-label="remove">✕</button>
+            </span>
+          ))}
+          <input
+            ref={inputRef}
+            className="search-input"
+            placeholder={drugs.length ? "Add another drug…" : "Search by drug name or ID…"}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            autoComplete="off"
+          />
+          {suggestions.length > 0 && (
+            <div className="dropdown">
+              {suggestions.map((s, i) => (
+                <div
+                  key={s.id}
+                  className={`dropdown-item${i === activeIdx ? " active" : ""}`}
+                  onMouseDown={() => addDrug(s)}
+                >
+                  <span className="drug-name">{s.name}</span>
+                  <span className="drug-id">{s.id}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="actions">
+          <button className="btn btn-primary" onClick={calculate} disabled={drugs.length < 1 || loading}>
+            {loading ? "Calculating…" : "Calculate Risk"}
+          </button>
+          {(drugs.length > 0 || result) && (
+            <button className="btn btn-ghost" onClick={clear}>Clear</button>
+          )}
+          <span className="hint">
+            {drugs.length === 0 ? "Add ≥ 1 drug" : `${drugs.length} drug${drugs.length > 1 ? "s" : ""} in regime`}
+          </span>
+        </div>
+
+        {/* Loading */}
+        {loading && (
+          <div className="loading">
+            <div className="spinner" />
+            Scoring {drugs.length} drug{drugs.length > 1 ? "s" : ""}…
+          </div>
+        )}
+
+        {/* Error */}
+        {error && <div className="error-box">⚠ {error}</div>}
+
+        {/* Results */}
+        {result && (
+          <div className="results">
+            <div className="results-header">
+              <h2>Results</h2>
+            </div>
+
+            {/* Score cards */}
+            <div className="score-banner">
+              <div className="score-card primary">
+                <label>Regime Risk</label>
+                <div className="value">{result.normalized_risk.toFixed(3)}</div>
+                <div className="sub">avg drug risk · {result.drugs.length} drugs</div>
+              </div>
+              <div className="score-card">
+                <label>DB Coverage</label>
+                <div className={`value${result.coverage_pct < 30 ? " warn" : ""}`}>
+                  {result.coverage_pct}%
+                </div>
+                <div className="sub">{result.populated_edges} / {result.possible_edges} pairs</div>
+              </div>
+              <div className="score-card">
+                <label>Drugs Scored</label>
+                <div className="value">{result.drugs.length}</div>
+                <div className="sub">{result.unknown_drugs.length} unrecognised</div>
+              </div>
+            </div>
+
+            {/* Per-drug table */}
+            <table className="drug-table">
+              <thead>
+                <tr>
+                  <th>Drug</th>
+                  <th>ID</th>
+                  <th style={{ textAlign: "right" }}>Risk (avg strength)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.drugs.map(d => (
+                  <tr key={d.id}>
+                    <td className="drug-name-cell">{d.name}</td>
+                    <td className="drug-id-cell">{d.id}</td>
+                    <td>
+                      <div className="risk-bar-wrap">
+                        <div className="risk-bar">
+                          <div
+                            className="risk-bar-fill"
+                            style={{
+                              width: `${(d.risk / maxRisk) * 100}%`,
+                              background: riskColor(d.risk, maxRisk),
+                            }}
+                          />
+                        </div>
+                        {d.avg_strength !== null
+                          ? d.risk.toFixed(4)
+                          : <span className="no-data">no data</span>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Unknown drugs */}
+            {result.unknown_drugs.length > 0 && (
+              <div className="unknown-box">
+                <strong>⚠ Not found in database:</strong>
+                {result.unknown_drugs.join(", ")}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}

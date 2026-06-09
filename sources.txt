@@ -1,0 +1,7 @@
+Drug data:
+    Source:  DDInter 2.0 (ddinter2.scbdd.com)
+    License: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+
+Code libraries:
+    Source:  Node.js (nodejs.org)
+    License: Creative Commons Attribution 4.0 (???)
