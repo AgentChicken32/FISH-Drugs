@@ -1,6 +1,7 @@
 """
 Drug Interaction Risk Scorer — FastAPI Backend
 Rebuilds SQLite DB from CSV on startup, then serves regime risk queries.
+Computes and persists pairwise drug matching scores on first run.
 """
 
 import csv
@@ -19,19 +20,16 @@ from pydantic import BaseModel
 # Config
 # ---------------------------------------------------------------------------
 
-CSV_PATH = os.environ.get("DRUG_CSV", "interactions.csv")
-DB_PATH = os.environ.get("DRUG_DB", "interactions.db")
+CSV_PATH          = os.environ.get("DRUG_CSV",           "interactions.csv")
+DB_PATH           = os.environ.get("DRUG_DB",            "interactions.db")
+SIMILARITY_CUTOFF = float(os.environ.get("SIM_CUTOFF",   "0.90"))
 
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
 
 def build_database(csv_path: str, db_path: str) -> None:
-    """Drop and rebuild the interactions DB from a CSV file.
-
-    Expected CSV columns (no header required, but supported):
-        drug_a_id, drug_a_name, drug_b_id, drug_b_name, interaction_strength
-    """
+    """Drop and rebuild the interactions DB from a CSV file."""
     if not Path(csv_path).exists():
         print(f"[warn] CSV not found at '{csv_path}' — starting with empty DB.", file=sys.stderr)
         _init_schema(db_path)
@@ -45,7 +43,6 @@ def build_database(csv_path: str, db_path: str) -> None:
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
             first = next(reader, None)
-            # Detect header row
             if first and not _is_data_row(first):
                 rows = reader
             else:
@@ -68,7 +65,6 @@ def build_database(csv_path: str, db_path: str) -> None:
                 if len(batch) >= 10_000:
                     cur.executemany(_INSERT_SQL, batch)
                     batch.clear()
-
             if batch:
                 cur.executemany(_INSERT_SQL, batch)
 
@@ -104,6 +100,17 @@ INSERT INTO interactions (drug_a_id, drug_a_name, drug_b_id, drug_b_name, streng
 VALUES (?, ?, ?, ?, ?)
 """
 
+_MATCHING_SCHEMA = """
+CREATE TABLE IF NOT EXISTS matching_scores (
+    drug_a_id TEXT NOT NULL,
+    drug_b_id TEXT NOT NULL,
+    score     REAL NOT NULL,
+    PRIMARY KEY (drug_a_id, drug_b_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ms_a ON matching_scores(drug_a_id);
+CREATE INDEX IF NOT EXISTS idx_ms_b ON matching_scores(drug_b_id);
+"""
+
 
 def _init_schema(db_path: str, conn: sqlite3.Connection | None = None) -> None:
     close = conn is None
@@ -122,11 +129,158 @@ def get_conn() -> sqlite3.Connection:
 
 
 # ---------------------------------------------------------------------------
-# Risk calculation
+# Matching score computation
+# ---------------------------------------------------------------------------
+
+def build_matching_scores(db_path: str) -> None:
+    """
+    Compute Sørensen-Dice matching scores for every pair of drugs and persist
+    them into matching_scores.  Skipped if the table already has rows.
+
+    Score(A, B) = 2 * |neighbors(A) ∩ neighbors(B)| / (|neighbors(A)| + |neighbors(B)|)
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(_MATCHING_SCHEMA)
+        conn.commit()
+
+        existing = conn.execute("SELECT COUNT(*) FROM matching_scores").fetchone()[0]
+        if existing > 0:
+            print(f"[info] Matching scores already present ({existing:,} rows) — skipping rebuild.")
+            return
+
+        print("[info] Building matching score lookup table…")
+
+        rows = conn.execute(
+            """
+            SELECT drug_a_id AS id, drug_b_id AS neighbor FROM interactions
+            UNION ALL
+            SELECT drug_b_id AS id, drug_a_id AS neighbor FROM interactions
+            """
+        ).fetchall()
+
+        neighbors: dict[str, set[str]] = {}
+        for row in rows:
+            drug_id, neighbor = row[0], row[1]
+            if drug_id not in neighbors:
+                neighbors[drug_id] = set()
+            neighbors[drug_id].add(neighbor)
+
+        drugs = list(neighbors.keys())
+        total_pairs = len(drugs) * (len(drugs) - 1) // 2
+        print(f"[info] {len(drugs):,} drugs → {total_pairs:,} pairs to score.")
+
+        batch = []
+        BATCH_SIZE = 50_000
+
+        for drug_a, drug_b in itertools.combinations(drugs, 2):
+            na = neighbors[drug_a]
+            nb = neighbors[drug_b]
+            denom = len(na) + len(nb)
+            score = (2 * len(na & nb) / denom) if denom > 0 else 0.0
+            batch.append((drug_a, drug_b, score))
+            batch.append((drug_b, drug_a, score))
+            if len(batch) >= BATCH_SIZE:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO matching_scores VALUES (?, ?, ?)", batch
+                )
+                conn.commit()
+                batch.clear()
+
+        if batch:
+            conn.executemany(
+                "INSERT OR IGNORE INTO matching_scores VALUES (?, ?, ?)", batch
+            )
+            conn.commit()
+
+        final = conn.execute("SELECT COUNT(*) FROM matching_scores").fetchone()[0]
+        print(f"[info] Matching score table built: {final:,} rows.")
+    finally:
+        conn.close()
+
+
+def get_matching_score(conn: sqlite3.Connection, id_a: str, id_b: str) -> float | None:
+    row = conn.execute(
+        "SELECT score FROM matching_scores WHERE drug_a_id = ? AND drug_b_id = ?",
+        (id_a, id_b),
+    ).fetchone()
+    if row:
+        return row["score"]
+    row = conn.execute(
+        "SELECT score FROM matching_scores WHERE drug_a_id = ? AND drug_b_id = ?",
+        (id_b, id_a),
+    ).fetchone()
+    return row["score"] if row else None
+
+
+# ---------------------------------------------------------------------------
+# Similarity-based replacement suggestions
+# ---------------------------------------------------------------------------
+
+def find_similar_replacements(
+    conn: sqlite3.Connection,
+    drug_id: str,
+    regime_ids: set[str],
+    cutoff: float = SIMILARITY_CUTOFF,
+) -> list[dict]:
+    """
+    Return all drugs outside the regime whose matching score with `drug_id`
+    is >= cutoff, sorted by their total interaction count (descending).
+
+    Each result dict: {id, name, score, interaction_count}
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            ms.drug_b_id  AS id,
+            ms.score      AS score,
+            (
+                SELECT COUNT(*)
+                FROM interactions i
+                WHERE i.drug_a_id = ms.drug_b_id OR i.drug_b_id = ms.drug_b_id
+            ) AS interaction_count
+        FROM matching_scores ms
+        WHERE ms.drug_a_id = ?
+          AND ms.score >= ?
+        ORDER BY interaction_count DESC
+        """,
+        (drug_id, cutoff),
+    ).fetchall()
+
+    regime_set = regime_ids  # already a set
+    results = []
+    for row in rows:
+        cand_id = row["id"]
+        if cand_id in regime_set:
+            continue
+        # Resolve the candidate's display name
+        name_row = conn.execute(
+            """
+            SELECT COALESCE(
+                MAX(CASE WHEN drug_a_id = ? THEN drug_a_name END),
+                MAX(CASE WHEN drug_b_id = ? THEN drug_b_name END)
+            ) AS name
+            FROM interactions
+            WHERE drug_a_id = ? OR drug_b_id = ?
+            """,
+            (cand_id, cand_id, cand_id, cand_id),
+        ).fetchone()
+        name = name_row["name"] if name_row else cand_id
+        results.append({
+            "id":                cand_id,
+            "name":              name,
+            "score":             row["score"],
+            "interaction_count": row["interaction_count"],
+        })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Risk calculation helpers
 # ---------------------------------------------------------------------------
 
 def drug_avg_strength(conn: sqlite3.Connection, drug_id: str) -> float | None:
-    """Average interaction strength for a drug across all its recorded pairs."""
     row = conn.execute(
         """
         SELECT AVG(strength) AS avg_s
@@ -135,7 +289,7 @@ def drug_avg_strength(conn: sqlite3.Connection, drug_id: str) -> float | None:
         """,
         (drug_id, drug_id),
     ).fetchone()
-    return row["avg_s"]  # None if no rows
+    return row["avg_s"]
 
 
 def pair_has_interaction(conn: sqlite3.Connection, id_a: str, id_b: str) -> bool:
@@ -152,7 +306,6 @@ def pair_has_interaction(conn: sqlite3.Connection, id_a: str, id_b: str) -> bool
 
 
 def resolve_drug(conn: sqlite3.Connection, query: str) -> dict | None:
-    """Find a drug by ID or name (case-insensitive). Returns {id, name} or None."""
     row = conn.execute(
         """
         SELECT drug_a_id AS id, drug_a_name AS name FROM interactions
@@ -175,7 +328,6 @@ def resolve_drug(conn: sqlite3.Connection, query: str) -> dict | None:
 
 
 def search_drugs(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[dict]:
-    """Search drugs by partial name or ID match."""
     pattern = f"%{query}%"
     rows = conn.execute(
         """
@@ -198,6 +350,7 @@ def search_drugs(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     build_database(CSV_PATH, DB_PATH)
+    build_matching_scores(DB_PATH)
     yield
 
 
@@ -216,24 +369,47 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 class RegimeRequest(BaseModel):
-    drug_ids: list[str]  # list of drug IDs or names
+    drug_ids: list[str]
 
 
 class DrugRisk(BaseModel):
     id: str
     name: str
     avg_strength: float | None
-    risk: float  # same as avg_strength, None treated as 0
+    risk: float
+
+
+class PairScore(BaseModel):
+    drug_a_id:   str
+    drug_a_name: str
+    drug_b_id:   str
+    drug_b_name: str
+    score:       float | None
+
+
+class ReplacementCandidate(BaseModel):
+    id:                str
+    name:              str
+    score:             float   # matching score vs the original drug
+    interaction_count: int     # total interactions in the DB
+
+
+class DrugReplacements(BaseModel):
+    drug_id:      str
+    drug_name:    str
+    replacements: list[ReplacementCandidate]   # sorted by interaction_count desc
 
 
 class RegimeResponse(BaseModel):
     drugs: list[DrugRisk]
     total_risk: float
-    normalized_risk: float  # total_risk / number of drugs
+    normalized_risk: float
     populated_edges: int
     possible_edges: int
     coverage_pct: float
     unknown_drugs: list[str]
+    pair_scores: list[PairScore]
+    similar_replacements: list[DrugReplacements]   # ← new
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +444,6 @@ def regime_risk(req: RegimeRequest):
         for q in req.drug_ids:
             drug = resolve_drug(conn, q)
             if drug:
-                # Avoid duplicates
                 if not any(d["id"] == drug["id"] for d in resolved):
                     resolved.append(drug)
             else:
@@ -289,21 +464,48 @@ def regime_risk(req: RegimeRequest):
         n = len(drug_risks)
         normalized_risk = total_risk / n if n > 0 else 0.0
 
-        # Coverage: check all unique pairs
-        ids = [d.id for d in drug_risks]
+        ids   = [d.id   for d in drug_risks]
+        names = {d.id: d.name for d in drug_risks}
+        regime_set = set(ids)
         pairs = list(itertools.combinations(ids, 2))
-        possible = len(pairs)
+        possible  = len(pairs)
         populated = sum(1 for a, b in pairs if pair_has_interaction(conn, a, b))
-        coverage = (populated / possible * 100) if possible > 0 else 0.0
+        coverage  = (populated / possible * 100) if possible > 0 else 0.0
+
+        # Pairwise matching scores within the regime
+        pair_scores: list[PairScore] = []
+        for id_a, id_b in pairs:
+            score = get_matching_score(conn, id_a, id_b)
+            pair_scores.append(PairScore(
+                drug_a_id=id_a,
+                drug_a_name=names[id_a],
+                drug_b_id=id_b,
+                drug_b_name=names[id_b],
+                score=score,
+            ))
+
+        # Similar-drug replacement suggestions (outside the regime)
+        similar_replacements: list[DrugReplacements] = []
+        for drug in resolved:
+            candidates = find_similar_replacements(conn, drug["id"], regime_set)
+            similar_replacements.append(DrugReplacements(
+                drug_id=drug["id"],
+                drug_name=drug["name"],
+                replacements=[
+                    ReplacementCandidate(**c) for c in candidates
+                ],
+            ))
 
         return RegimeResponse(
             drugs=drug_risks,
             total_risk=total_risk,
-            normalized_risk=round(normalized_risk, 6),  # ← add this line
+            normalized_risk=round(normalized_risk, 6),
             populated_edges=populated,
             possible_edges=possible,
             coverage_pct=round(coverage, 1),
             unknown_drugs=unknown,
+            pair_scores=pair_scores,
+            similar_replacements=similar_replacements,
         )
     finally:
         conn.close()
