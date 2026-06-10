@@ -157,7 +157,7 @@ echo.
 echo   Press Ctrl+C in each window to stop the servers.
 echo ============================================================
 echo.
-goto :end
+goto :done
 
 :fail
 echo.
@@ -168,3 +168,6 @@ echo ============================================================
 :end
 echo Press any key to close this launcher window...
 pause >nul
+
+:done
+exit

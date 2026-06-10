@@ -20,8 +20,9 @@ from pydantic import BaseModel
 # Config
 # ---------------------------------------------------------------------------
 
-CSV_PATH = os.environ.get("DRUG_CSV", "interactions.csv")
-DB_PATH  = os.environ.get("DRUG_DB",  "interactions.db")
+CSV_PATH          = os.environ.get("DRUG_CSV",           "interactions.csv")
+DB_PATH           = os.environ.get("DRUG_DB",            "interactions.db")
+SIMILARITY_CUTOFF = float(os.environ.get("SIM_CUTOFF",   "0.90"))
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -150,7 +151,6 @@ def build_matching_scores(db_path: str) -> None:
 
         print("[info] Building matching score lookup table…")
 
-        # Build adjacency: drug -> set of all drugs it interacts with
         rows = conn.execute(
             """
             SELECT drug_a_id AS id, drug_b_id AS neighbor FROM interactions
@@ -178,7 +178,6 @@ def build_matching_scores(db_path: str) -> None:
             nb = neighbors[drug_b]
             denom = len(na) + len(nb)
             score = (2 * len(na & nb) / denom) if denom > 0 else 0.0
-            # Store both orderings for symmetric O(1) lookup
             batch.append((drug_a, drug_b, score))
             batch.append((drug_b, drug_a, score))
             if len(batch) >= BATCH_SIZE:
@@ -201,7 +200,6 @@ def build_matching_scores(db_path: str) -> None:
 
 
 def get_matching_score(conn: sqlite3.Connection, id_a: str, id_b: str) -> float | None:
-    """Look up the precomputed matching score for a drug pair (order-insensitive)."""
     row = conn.execute(
         "SELECT score FROM matching_scores WHERE drug_a_id = ? AND drug_b_id = ?",
         (id_a, id_b),
@@ -213,6 +211,69 @@ def get_matching_score(conn: sqlite3.Connection, id_a: str, id_b: str) -> float 
         (id_b, id_a),
     ).fetchone()
     return row["score"] if row else None
+
+
+# ---------------------------------------------------------------------------
+# Similarity-based replacement suggestions
+# ---------------------------------------------------------------------------
+
+def find_similar_replacements(
+    conn: sqlite3.Connection,
+    drug_id: str,
+    regime_ids: set[str],
+    cutoff: float = SIMILARITY_CUTOFF,
+) -> list[dict]:
+    """
+    Return all drugs outside the regime whose matching score with `drug_id`
+    is >= cutoff, sorted by their total interaction count (descending).
+
+    Each result dict: {id, name, score, interaction_count}
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            ms.drug_b_id  AS id,
+            ms.score      AS score,
+            (
+                SELECT COUNT(*)
+                FROM interactions i
+                WHERE i.drug_a_id = ms.drug_b_id OR i.drug_b_id = ms.drug_b_id
+            ) AS interaction_count
+        FROM matching_scores ms
+        WHERE ms.drug_a_id = ?
+          AND ms.score >= ?
+        ORDER BY interaction_count DESC
+        """,
+        (drug_id, cutoff),
+    ).fetchall()
+
+    regime_set = regime_ids  # already a set
+    results = []
+    for row in rows:
+        cand_id = row["id"]
+        if cand_id in regime_set:
+            continue
+        # Resolve the candidate's display name
+        name_row = conn.execute(
+            """
+            SELECT COALESCE(
+                MAX(CASE WHEN drug_a_id = ? THEN drug_a_name END),
+                MAX(CASE WHEN drug_b_id = ? THEN drug_b_name END)
+            ) AS name
+            FROM interactions
+            WHERE drug_a_id = ? OR drug_b_id = ?
+            """,
+            (cand_id, cand_id, cand_id, cand_id),
+        ).fetchone()
+        name = name_row["name"] if name_row else cand_id
+        results.append({
+            "id":                cand_id,
+            "name":              name,
+            "score":             row["score"],
+            "interaction_count": row["interaction_count"],
+        })
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +387,19 @@ class PairScore(BaseModel):
     score:       float | None
 
 
+class ReplacementCandidate(BaseModel):
+    id:                str
+    name:              str
+    score:             float   # matching score vs the original drug
+    interaction_count: int     # total interactions in the DB
+
+
+class DrugReplacements(BaseModel):
+    drug_id:      str
+    drug_name:    str
+    replacements: list[ReplacementCandidate]   # sorted by interaction_count desc
+
+
 class RegimeResponse(BaseModel):
     drugs: list[DrugRisk]
     total_risk: float
@@ -335,6 +409,7 @@ class RegimeResponse(BaseModel):
     coverage_pct: float
     unknown_drugs: list[str]
     pair_scores: list[PairScore]
+    similar_replacements: list[DrugReplacements]   # ← new
 
 
 # ---------------------------------------------------------------------------
@@ -391,11 +466,13 @@ def regime_risk(req: RegimeRequest):
 
         ids   = [d.id   for d in drug_risks]
         names = {d.id: d.name for d in drug_risks}
+        regime_set = set(ids)
         pairs = list(itertools.combinations(ids, 2))
         possible  = len(pairs)
         populated = sum(1 for a, b in pairs if pair_has_interaction(conn, a, b))
         coverage  = (populated / possible * 100) if possible > 0 else 0.0
 
+        # Pairwise matching scores within the regime
         pair_scores: list[PairScore] = []
         for id_a, id_b in pairs:
             score = get_matching_score(conn, id_a, id_b)
@@ -407,6 +484,18 @@ def regime_risk(req: RegimeRequest):
                 score=score,
             ))
 
+        # Similar-drug replacement suggestions (outside the regime)
+        similar_replacements: list[DrugReplacements] = []
+        for drug in resolved:
+            candidates = find_similar_replacements(conn, drug["id"], regime_set)
+            similar_replacements.append(DrugReplacements(
+                drug_id=drug["id"],
+                drug_name=drug["name"],
+                replacements=[
+                    ReplacementCandidate(**c) for c in candidates
+                ],
+            ))
+
         return RegimeResponse(
             drugs=drug_risks,
             total_risk=total_risk,
@@ -416,6 +505,7 @@ def regime_risk(req: RegimeRequest):
             coverage_pct=round(coverage, 1),
             unknown_drugs=unknown,
             pair_scores=pair_scores,
+            similar_replacements=similar_replacements,
         )
     finally:
         conn.close()
