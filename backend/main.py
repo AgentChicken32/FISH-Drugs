@@ -57,10 +57,19 @@ def build_database(csv_path: str, db_path: str) -> None:
                     strength_f = float(strength)
                 except ValueError:
                     continue
+                # Column 6 (index 5): mechanism of interaction.
+                # Treat missing, "Unknown", or purely numeric values as None.
+                raw_mech = row[5].strip() if len(row) > 5 else ""
+                mechanism: str | None = None
+                if raw_mech and raw_mech.lower() != "unknown":
+                    try:
+                        float(raw_mech)   # numeric-only → malformed row
+                    except ValueError:
+                        mechanism = raw_mech
                 batch.append((
                     drug_a_id.strip(), drug_a_name.strip(),
                     drug_b_id.strip(), drug_b_name.strip(),
-                    strength_f,
+                    strength_f, mechanism,
                 ))
                 if len(batch) >= 10_000:
                     cur.executemany(_INSERT_SQL, batch)
@@ -89,15 +98,16 @@ CREATE TABLE IF NOT EXISTS interactions (
     drug_a_name TEXT NOT NULL,
     drug_b_id   TEXT NOT NULL,
     drug_b_name TEXT NOT NULL,
-    strength    REAL NOT NULL
+    strength    REAL NOT NULL,
+    mechanism   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_a ON interactions(drug_a_id);
 CREATE INDEX IF NOT EXISTS idx_b ON interactions(drug_b_id);
 """
 
 _INSERT_SQL = """
-INSERT INTO interactions (drug_a_id, drug_a_name, drug_b_id, drug_b_name, strength)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO interactions (drug_a_id, drug_a_name, drug_b_id, drug_b_name, strength, mechanism)
+VALUES (?, ?, ?, ?, ?, ?)
 """
 
 _MATCHING_SCHEMA = """
@@ -280,15 +290,34 @@ def find_similar_replacements(
 # Risk calculation helpers
 # ---------------------------------------------------------------------------
 
-def drug_avg_strength(conn: sqlite3.Connection, drug_id: str) -> float | None:
-    row = conn.execute(
-        """
-        SELECT AVG(strength) AS avg_s
-        FROM interactions
-        WHERE drug_a_id = ? OR drug_b_id = ?
-        """,
-        (drug_id, drug_id),
-    ).fetchone()
+def drug_avg_strength(conn: sqlite3.Connection, drug_id: str, regime_ids: list[str] | None = None) -> float | None:
+    """
+    Average interaction strength for drug_id.
+    If regime_ids is provided, only averages interactions with other drugs in the regime.
+    """
+    if regime_ids is not None:
+        other_ids = [rid for rid in regime_ids if rid != drug_id]
+        if not other_ids:
+            return None
+        placeholders = ",".join("?" * len(other_ids))
+        row = conn.execute(
+            f"""
+            SELECT AVG(strength) AS avg_s
+            FROM interactions
+            WHERE (drug_a_id = ? AND drug_b_id IN ({placeholders}))
+               OR (drug_b_id = ? AND drug_a_id IN ({placeholders}))
+            """,
+            [drug_id] + other_ids + [drug_id] + other_ids,
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT AVG(strength) AS avg_s
+            FROM interactions
+            WHERE drug_a_id = ? OR drug_b_id = ?
+            """,
+            (drug_id, drug_id),
+        ).fetchone()
     return row["avg_s"]
 
 
@@ -385,6 +414,7 @@ class PairScore(BaseModel):
     drug_b_id:   str
     drug_b_name: str
     score:       float | None
+    mechanism:   str | None    # None when unknown or no direct interaction recorded
 
 
 class ReplacementCandidate(BaseModel):
@@ -395,9 +425,10 @@ class ReplacementCandidate(BaseModel):
 
 
 class DrugReplacements(BaseModel):
-    drug_id:      str
-    drug_name:    str
-    replacements: list[ReplacementCandidate]   # sorted by interaction_count desc
+    drug_id:                  str
+    drug_name:                str
+    original_interaction_count: int
+    replacements:             list[ReplacementCandidate]   # sorted by interaction_count desc
 
 
 class RegimeResponse(BaseModel):
@@ -449,9 +480,10 @@ def regime_risk(req: RegimeRequest):
             else:
                 unknown.append(q)
 
+        resolved_ids = [d["id"] for d in resolved]
         drug_risks: list[DrugRisk] = []
         for drug in resolved:
-            avg = drug_avg_strength(conn, drug["id"])
+            avg = drug_avg_strength(conn, drug["id"], regime_ids=resolved_ids)
             risk_val = avg if avg is not None else 0.0
             drug_risks.append(DrugRisk(
                 id=drug["id"],
@@ -476,21 +508,41 @@ def regime_risk(req: RegimeRequest):
         pair_scores: list[PairScore] = []
         for id_a, id_b in pairs:
             score = get_matching_score(conn, id_a, id_b)
+            mech_row = conn.execute(
+                """
+                SELECT mechanism FROM interactions
+                WHERE (drug_a_id = ? AND drug_b_id = ?)
+                   OR (drug_a_id = ? AND drug_b_id = ?)
+                LIMIT 1
+                """,
+                (id_a, id_b, id_b, id_a),
+            ).fetchone()
+            mechanism = mech_row["mechanism"] if mech_row else None
             pair_scores.append(PairScore(
                 drug_a_id=id_a,
                 drug_a_name=names[id_a],
                 drug_b_id=id_b,
                 drug_b_name=names[id_b],
                 score=score,
+                mechanism=mechanism,
             ))
 
         # Similar-drug replacement suggestions (outside the regime)
         similar_replacements: list[DrugReplacements] = []
         for drug in resolved:
             candidates = find_similar_replacements(conn, drug["id"], regime_set)
+            orig_count_row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt FROM interactions
+                WHERE drug_a_id = ? OR drug_b_id = ?
+                """,
+                (drug["id"], drug["id"]),
+            ).fetchone()
+            orig_count = orig_count_row["cnt"] if orig_count_row else 0
             similar_replacements.append(DrugReplacements(
                 drug_id=drug["id"],
                 drug_name=drug["name"],
+                original_interaction_count=orig_count,
                 replacements=[
                     ReplacementCandidate(**c) for c in candidates
                 ],

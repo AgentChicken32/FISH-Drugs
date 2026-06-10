@@ -203,6 +203,14 @@ const css = `
   .repl-count { font-family: var(--mono); font-size: 0.8rem; color: var(--subtext); text-align: right; }
   .repl-score-cell { text-align: right; white-space: nowrap; }
 
+  .mech-badge {
+    display: inline-block;
+    font-family: var(--mono); font-size: 0.65rem;
+    background: #0d1a2e; border: 1px solid #1e3a5f;
+    color: var(--blue); border-radius: 4px; padding: 2px 7px;
+    white-space: nowrap;
+  }
+
   .unknown-box {
     margin-top: 16px; background: #1f1210; border: 1px solid #4a1a1a;
     border-radius: var(--radius); padding: 12px 16px;
@@ -251,6 +259,7 @@ export default function App() {
   const [online, setOnline]       = useState(null);
   const [dbCount, setDbCount]     = useState(null);
   const inputRef = useRef(null);
+  const inputAreaRef = useRef(null);
   const debouncedQ = useDebounce(query, 200);
 
   useEffect(() => {
@@ -303,6 +312,17 @@ export default function App() {
     finally { setLoading(false); }
   };
 
+  // Close dropdown when clicking outside the input area
+  useEffect(() => {
+    const handleMouseDown = (e) => {
+      if (inputAreaRef.current && !inputAreaRef.current.contains(e.target)) {
+        setSuggs([]);
+      }
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, []);
+
   const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); };
 
   const maxRisk = result ? Math.max(...result.drugs.map(d => d.risk), 0.001) : 1;
@@ -322,7 +342,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="input-area" onClick={() => inputRef.current?.focus()}>
+        <div className="input-area" ref={inputAreaRef} onClick={() => inputRef.current?.focus()}>
           {drugs.map(d => (
             <span key={d.id} className="tag">
               {d.name}
@@ -420,7 +440,7 @@ export default function App() {
                 <p className="section-title">Pairwise Matching Scores</p>
                 <table className="data-table">
                   <thead>
-                    <tr><th>Drug Pair</th><th className="right">Matching Score</th></tr>
+                    <tr><th>Drug Pair</th><th>Mechanism</th><th className="right">Matching Score</th></tr>
                   </thead>
                   <tbody>
                     {result.pair_scores.map((ps, i) => {
@@ -434,6 +454,11 @@ export default function App() {
                               <span className="pair-sep">↔</span>
                               <span>{ps.drug_b_name}</span>
                             </div>
+                          </td>
+                          <td>
+                            {ps.mechanism
+                              ? <span className="mech-badge">{ps.mechanism}</span>
+                              : <span className="no-data">—</span>}
                           </td>
                           <td className="repl-score-cell">
                             {s !== null ? (
@@ -476,7 +501,7 @@ export default function App() {
                             <tr>
                               <th>Replacement Drug</th>
                               <th>ID</th>
-                              <th className="right">Total Interactions</th>
+                              <th className="right">Interactions (original: {group.original_interaction_count.toLocaleString()})</th>
                               <th className="right">Match Score</th>
                             </tr>
                           </thead>
