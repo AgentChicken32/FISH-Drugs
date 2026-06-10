@@ -112,21 +112,34 @@ VALUES (?, ?, ?, ?, ?, ?)
 
 _MATCHING_SCHEMA = """
 CREATE TABLE IF NOT EXISTS matching_scores (
-    drug_a_id TEXT NOT NULL,
-    drug_b_id TEXT NOT NULL,
-    score     REAL NOT NULL,
-    PRIMARY KEY (drug_a_id, drug_b_id)
+    drug_a_num INTEGER NOT NULL,
+    drug_b_num INTEGER NOT NULL,
+    score      REAL    NOT NULL,
+    PRIMARY KEY (drug_a_num, drug_b_num)
 );
-CREATE INDEX IF NOT EXISTS idx_ms_a ON matching_scores(drug_a_id);
-CREATE INDEX IF NOT EXISTS idx_ms_b ON matching_scores(drug_b_id);
 """
+# Only one ordered pair (lo_num, hi_num) is stored per drug pair, so no
+# reverse-lookup index is needed - the PK B-tree covers drug_a_num lookups
+# directly.  drug_b_num lookups (find_similar_replacements) require a scan,
+# but the table is half the size it used to be and fits easily in the page
+# cache, so this is still fast enough.
+
+
+def _id_to_num(drug_id: str) -> int:
+    """Strip the 'DDInter' prefix and return the integer drug number."""
+    return int(drug_id[7:])  # 'DDInter' is 7 characters
 
 
 def _init_schema(db_path: str, conn: sqlite3.Connection | None = None) -> None:
     close = conn is None
     if close:
         conn = sqlite3.connect(db_path)
-    conn.executescript("DROP TABLE IF EXISTS interactions;" + _SCHEMA)
+    # Drop both tables so a schema change always takes full effect on restart.
+    conn.executescript(
+        "DROP TABLE IF EXISTS interactions;"
+        "DROP TABLE IF EXISTS matching_scores;"
+        + _SCHEMA
+    )
     conn.commit()
     if close:
         conn.close()
@@ -144,10 +157,14 @@ def get_conn() -> sqlite3.Connection:
 
 def build_matching_scores(db_path: str) -> None:
     """
-    Compute Sørensen-Dice matching scores for every pair of drugs and persist
+    Compute Sorensen-Dice matching scores for every pair of drugs and persist
     them into matching_scores.  Skipped if the table already has rows.
 
-    Score(A, B) = 2 * |neighbors(A) ∩ neighbors(B)| / (|neighbors(A)| + |neighbors(B)|)
+    Score(A, B) = 2 * |neighbors(A) n neighbors(B)| / (|neighbors(A)| + |neighbors(B)|)
+
+    Storage layout: each pair is stored exactly once as (lo_num, hi_num, score)
+    where lo_num < hi_num.  This halves the row count versus storing both
+    directions, and uses 4-byte integers instead of ~14-byte text IDs.
     """
     conn = sqlite3.connect(db_path)
     try:
@@ -156,10 +173,10 @@ def build_matching_scores(db_path: str) -> None:
 
         existing = conn.execute("SELECT COUNT(*) FROM matching_scores").fetchone()[0]
         if existing > 0:
-            print(f"[info] Matching scores already present ({existing:,} rows) — skipping rebuild.")
+            print(f"[info] Matching scores already present ({existing:,} rows) - skipping rebuild.")
             return
 
-        print("[info] Building matching score lookup table…")
+        print("[info] Building matching score lookup table...")
 
         rows = conn.execute(
             """
@@ -169,27 +186,28 @@ def build_matching_scores(db_path: str) -> None:
             """
         ).fetchall()
 
-        neighbors: dict[str, set[str]] = {}
+        neighbors: dict[int, set[int]] = {}
         for row in rows:
-            drug_id, neighbor = row[0], row[1]
-            if drug_id not in neighbors:
-                neighbors[drug_id] = set()
-            neighbors[drug_id].add(neighbor)
+            drug_num     = _id_to_num(row[0])
+            neighbor_num = _id_to_num(row[1])
+            if drug_num not in neighbors:
+                neighbors[drug_num] = set()
+            neighbors[drug_num].add(neighbor_num)
 
-        drugs = list(neighbors.keys())
-        total_pairs = len(drugs) * (len(drugs) - 1) // 2
-        print(f"[info] {len(drugs):,} drugs → {total_pairs:,} pairs to score.")
+        drug_nums   = list(neighbors.keys())
+        total_pairs = len(drug_nums) * (len(drug_nums) - 1) // 2
+        print(f"[info] {len(drug_nums):,} drugs -> {total_pairs:,} pairs to score.")
 
         batch = []
         BATCH_SIZE = 50_000
 
-        for drug_a, drug_b in itertools.combinations(drugs, 2):
-            na = neighbors[drug_a]
-            nb = neighbors[drug_b]
+        for num_a, num_b in itertools.combinations(drug_nums, 2):
+            na = neighbors[num_a]
+            nb = neighbors[num_b]
             denom = len(na) + len(nb)
             score = (2 * len(na & nb) / denom) if denom > 0 else 0.0
-            batch.append((drug_a, drug_b, score))
-            batch.append((drug_b, drug_a, score))
+            lo, hi = (num_a, num_b) if num_a < num_b else (num_b, num_a)
+            batch.append((lo, hi, score))
             if len(batch) >= BATCH_SIZE:
                 conn.executemany(
                     "INSERT OR IGNORE INTO matching_scores VALUES (?, ?, ?)", batch
@@ -210,15 +228,11 @@ def build_matching_scores(db_path: str) -> None:
 
 
 def get_matching_score(conn: sqlite3.Connection, id_a: str, id_b: str) -> float | None:
+    num_a, num_b = _id_to_num(id_a), _id_to_num(id_b)
+    lo, hi = (num_a, num_b) if num_a < num_b else (num_b, num_a)
     row = conn.execute(
-        "SELECT score FROM matching_scores WHERE drug_a_id = ? AND drug_b_id = ?",
-        (id_a, id_b),
-    ).fetchone()
-    if row:
-        return row["score"]
-    row = conn.execute(
-        "SELECT score FROM matching_scores WHERE drug_a_id = ? AND drug_b_id = ?",
-        (id_b, id_a),
+        "SELECT score FROM matching_scores WHERE drug_a_num = ? AND drug_b_num = ?",
+        (lo, hi),
     ).fetchone()
     return row["score"] if row else None
 
@@ -238,51 +252,51 @@ def find_similar_replacements(
     is >= cutoff, sorted by their total interaction count (descending).
 
     Each result dict: {id, name, score, interaction_count}
+
+    Because matching_scores stores only one ordered pair (lo_num, hi_num),
+    the drug of interest may appear in either column, so we UNION both
+    directions to collect every neighbour.
     """
+    drug_num = _id_to_num(drug_id)
     rows = conn.execute(
         """
-        SELECT
-            ms.drug_b_id  AS id,
-            ms.score      AS score,
-            (
-                SELECT COUNT(*)
-                FROM interactions i
-                WHERE i.drug_a_id = ms.drug_b_id OR i.drug_b_id = ms.drug_b_id
-            ) AS interaction_count
+        SELECT 'DDInter' || ms.drug_b_num AS cand_id, ms.score
         FROM matching_scores ms
-        WHERE ms.drug_a_id = ?
-          AND ms.score >= ?
-        ORDER BY interaction_count DESC
+        WHERE ms.drug_a_num = ? AND ms.score >= ?
+        UNION ALL
+        SELECT 'DDInter' || ms.drug_a_num AS cand_id, ms.score
+        FROM matching_scores ms
+        WHERE ms.drug_b_num = ? AND ms.score >= ?
         """,
-        (drug_id, cutoff),
+        (drug_num, cutoff, drug_num, cutoff),
     ).fetchall()
 
-    regime_set = regime_ids  # already a set
     results = []
     for row in rows:
-        cand_id = row["id"]
-        if cand_id in regime_set:
+        cand_id = row[0]
+        if cand_id in regime_ids:
             continue
-        # Resolve the candidate's display name
-        name_row = conn.execute(
+        info_row = conn.execute(
             """
-            SELECT COALESCE(
-                MAX(CASE WHEN drug_a_id = ? THEN drug_a_name END),
-                MAX(CASE WHEN drug_b_id = ? THEN drug_b_name END)
-            ) AS name
+            SELECT
+                COUNT(*) AS cnt,
+                COALESCE(
+                    MAX(CASE WHEN drug_a_id = ? THEN drug_a_name END),
+                    MAX(CASE WHEN drug_b_id = ? THEN drug_b_name END)
+                ) AS name
             FROM interactions
             WHERE drug_a_id = ? OR drug_b_id = ?
             """,
             (cand_id, cand_id, cand_id, cand_id),
         ).fetchone()
-        name = name_row["name"] if name_row else cand_id
         results.append({
             "id":                cand_id,
-            "name":              name,
-            "score":             row["score"],
-            "interaction_count": row["interaction_count"],
+            "name":              info_row["name"] if info_row else cand_id,
+            "score":             row[1],
+            "interaction_count": info_row["cnt"]  if info_row else 0,
         })
 
+    results.sort(key=lambda r: r["interaction_count"], reverse=True)
     return results
 
 
