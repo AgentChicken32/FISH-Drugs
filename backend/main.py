@@ -67,8 +67,8 @@ def build_database(csv_path: str, db_path: str) -> None:
                     except ValueError:
                         mechanism = raw_mech
                 batch.append((
-                    drug_a_id.strip(), drug_a_name.strip(),
-                    drug_b_id.strip(), drug_b_name.strip(),
+                    _id_to_num(drug_a_id.strip()), drug_a_name.strip(),
+                    _id_to_num(drug_b_id.strip()), drug_b_name.strip(),
                     strength_f, mechanism,
                 ))
                 if len(batch) >= 10_000:
@@ -94,19 +94,19 @@ def _is_data_row(row: list[str]) -> bool:
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS interactions (
-    drug_a_id   TEXT NOT NULL,
-    drug_a_name TEXT NOT NULL,
-    drug_b_id   TEXT NOT NULL,
-    drug_b_name TEXT NOT NULL,
-    strength    REAL NOT NULL,
+    drug_a_num  INTEGER NOT NULL,
+    drug_a_name TEXT    NOT NULL,
+    drug_b_num  INTEGER NOT NULL,
+    drug_b_name TEXT    NOT NULL,
+    strength    REAL    NOT NULL,
     mechanism   TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_a ON interactions(drug_a_id);
-CREATE INDEX IF NOT EXISTS idx_b ON interactions(drug_b_id);
+CREATE INDEX IF NOT EXISTS idx_a ON interactions(drug_a_num);
+CREATE INDEX IF NOT EXISTS idx_b ON interactions(drug_b_num);
 """
 
 _INSERT_SQL = """
-INSERT INTO interactions (drug_a_id, drug_a_name, drug_b_id, drug_b_name, strength, mechanism)
+INSERT INTO interactions (drug_a_num, drug_a_name, drug_b_num, drug_b_name, strength, mechanism)
 VALUES (?, ?, ?, ?, ?, ?)
 """
 
@@ -180,16 +180,16 @@ def build_matching_scores(db_path: str) -> None:
 
         rows = conn.execute(
             """
-            SELECT drug_a_id AS id, drug_b_id AS neighbor FROM interactions
+            SELECT drug_a_num AS id, drug_b_num AS neighbor FROM interactions
             UNION ALL
-            SELECT drug_b_id AS id, drug_a_id AS neighbor FROM interactions
+            SELECT drug_b_num AS id, drug_a_num AS neighbor FROM interactions
             """
         ).fetchall()
 
         neighbors: dict[int, set[int]] = {}
         for row in rows:
-            drug_num     = _id_to_num(row[0])
-            neighbor_num = _id_to_num(row[1])
+            drug_num     = row[0]   # already an integer in the DB
+            neighbor_num = row[1]
             if drug_num not in neighbors:
                 neighbors[drug_num] = set()
             neighbors[drug_num].add(neighbor_num)
@@ -276,18 +276,19 @@ def find_similar_replacements(
         cand_id = row[0]
         if cand_id in regime_ids:
             continue
+        cand_num = _id_to_num(cand_id)
         info_row = conn.execute(
             """
             SELECT
                 COUNT(*) AS cnt,
                 COALESCE(
-                    MAX(CASE WHEN drug_a_id = ? THEN drug_a_name END),
-                    MAX(CASE WHEN drug_b_id = ? THEN drug_b_name END)
+                    MAX(CASE WHEN drug_a_num = ? THEN drug_a_name END),
+                    MAX(CASE WHEN drug_b_num = ? THEN drug_b_name END)
                 ) AS name
             FROM interactions
-            WHERE drug_a_id = ? OR drug_b_id = ?
+            WHERE drug_a_num = ? OR drug_b_num = ?
             """,
-            (cand_id, cand_id, cand_id, cand_id),
+            (cand_num, cand_num, cand_num, cand_num),
         ).fetchone()
         results.append({
             "id":                cand_id,
@@ -313,60 +314,86 @@ def drug_avg_strength(conn: sqlite3.Connection, drug_id: str, regime_ids: list[s
         other_ids = [rid for rid in regime_ids if rid != drug_id]
         if not other_ids:
             return None
-        placeholders = ",".join("?" * len(other_ids))
+        drug_num   = _id_to_num(drug_id)
+        other_nums = [_id_to_num(rid) for rid in other_ids]
+        placeholders = ",".join("?" * len(other_nums))
         row = conn.execute(
             f"""
             SELECT AVG(strength) AS avg_s
             FROM interactions
-            WHERE (drug_a_id = ? AND drug_b_id IN ({placeholders}))
-               OR (drug_b_id = ? AND drug_a_id IN ({placeholders}))
+            WHERE (drug_a_num = ? AND drug_b_num IN ({placeholders}))
+               OR (drug_b_num = ? AND drug_a_num IN ({placeholders}))
             """,
-            [drug_id] + other_ids + [drug_id] + other_ids,
+            [drug_num] + other_nums + [drug_num] + other_nums,
         ).fetchone()
     else:
+        drug_num = _id_to_num(drug_id)
         row = conn.execute(
             """
             SELECT AVG(strength) AS avg_s
             FROM interactions
-            WHERE drug_a_id = ? OR drug_b_id = ?
+            WHERE drug_a_num = ? OR drug_b_num = ?
             """,
-            (drug_id, drug_id),
+            (drug_num, drug_num),
         ).fetchone()
     return row["avg_s"]
 
 
 def pair_has_interaction(conn: sqlite3.Connection, id_a: str, id_b: str) -> bool:
+    num_a, num_b = _id_to_num(id_a), _id_to_num(id_b)
     row = conn.execute(
         """
         SELECT 1 FROM interactions
-        WHERE (drug_a_id = ? AND drug_b_id = ?)
-           OR (drug_a_id = ? AND drug_b_id = ?)
+        WHERE (drug_a_num = ? AND drug_b_num = ?)
+           OR (drug_a_num = ? AND drug_b_num = ?)
         LIMIT 1
         """,
-        (id_a, id_b, id_b, id_a),
+        (num_a, num_b, num_b, num_a),
     ).fetchone()
     return row is not None
 
 
 def resolve_drug(conn: sqlite3.Connection, query: str) -> dict | None:
-    row = conn.execute(
-        """
-        SELECT drug_a_id AS id, drug_a_name AS name FROM interactions
-        WHERE LOWER(drug_a_id) = LOWER(?) OR LOWER(drug_a_name) = LOWER(?)
-        LIMIT 1
-        """,
-        (query, query),
-    ).fetchone()
-    if row:
-        return dict(row)
-    row = conn.execute(
-        """
-        SELECT drug_b_id AS id, drug_b_name AS name FROM interactions
-        WHERE LOWER(drug_b_id) = LOWER(?) OR LOWER(drug_b_name) = LOWER(?)
-        LIMIT 1
-        """,
-        (query, query),
-    ).fetchone()
+    """Accept a full DDInterN ID string or a drug name (case-insensitive)."""
+    num: int | None = None
+    if query.upper().startswith("DDINTER"):
+        try:
+            num = _id_to_num(query)
+        except (ValueError, IndexError):
+            pass
+
+    if num is not None:
+        row = conn.execute(
+            """
+            SELECT 'DDInter' || drug_a_num AS id, drug_a_name AS name
+            FROM interactions WHERE drug_a_num = ? LIMIT 1
+            """,
+            (num,),
+        ).fetchone()
+        if not row:
+            row = conn.execute(
+                """
+                SELECT 'DDInter' || drug_b_num AS id, drug_b_name AS name
+                FROM interactions WHERE drug_b_num = ? LIMIT 1
+                """,
+                (num,),
+            ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT 'DDInter' || drug_a_num AS id, drug_a_name AS name
+            FROM interactions WHERE LOWER(drug_a_name) = LOWER(?) LIMIT 1
+            """,
+            (query,),
+        ).fetchone()
+        if not row:
+            row = conn.execute(
+                """
+                SELECT 'DDInter' || drug_b_num AS id, drug_b_name AS name
+                FROM interactions WHERE LOWER(drug_b_name) = LOWER(?) LIMIT 1
+                """,
+                (query,),
+            ).fetchone()
     return dict(row) if row else None
 
 
@@ -374,14 +401,16 @@ def search_drugs(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[
     pattern = f"%{query}%"
     rows = conn.execute(
         """
-        SELECT DISTINCT drug_a_id AS id, drug_a_name AS name FROM interactions
-        WHERE LOWER(drug_a_name) LIKE LOWER(?) OR LOWER(drug_a_id) LIKE LOWER(?)
+        SELECT DISTINCT 'DDInter' || drug_a_num AS id, drug_a_name AS name
+        FROM interactions
+        WHERE LOWER(drug_a_name) LIKE LOWER(?)
         UNION
-        SELECT DISTINCT drug_b_id AS id, drug_b_name AS name FROM interactions
-        WHERE LOWER(drug_b_name) LIKE LOWER(?) OR LOWER(drug_b_id) LIKE LOWER(?)
+        SELECT DISTINCT 'DDInter' || drug_b_num AS id, drug_b_name AS name
+        FROM interactions
+        WHERE LOWER(drug_b_name) LIKE LOWER(?)
         LIMIT ?
         """,
-        (pattern, pattern, pattern, pattern, limit),
+        (pattern, pattern, limit),
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -463,8 +492,11 @@ class RegimeResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    with get_conn() as conn:
+    conn = get_conn()
+    try:
         count = conn.execute("SELECT COUNT(*) FROM interactions").fetchone()[0]
+    finally:
+        conn.close()
     return {"status": "ok", "interactions": count}
 
 
@@ -472,8 +504,11 @@ def health():
 def search(q: str, limit: int = 10):
     if len(q) < 2:
         return []
-    with get_conn() as conn:
+    conn = get_conn()
+    try:
         return search_drugs(conn, q, limit)
+    finally:
+        conn.close()
 
 
 @app.post("/regime/risk", response_model=RegimeResponse)
@@ -522,14 +557,15 @@ def regime_risk(req: RegimeRequest):
         pair_scores: list[PairScore] = []
         for id_a, id_b in pairs:
             score = get_matching_score(conn, id_a, id_b)
+            na, nb = _id_to_num(id_a), _id_to_num(id_b)
             mech_row = conn.execute(
                 """
                 SELECT mechanism FROM interactions
-                WHERE (drug_a_id = ? AND drug_b_id = ?)
-                   OR (drug_a_id = ? AND drug_b_id = ?)
+                WHERE (drug_a_num = ? AND drug_b_num = ?)
+                   OR (drug_a_num = ? AND drug_b_num = ?)
                 LIMIT 1
                 """,
-                (id_a, id_b, id_b, id_a),
+                (na, nb, nb, na),
             ).fetchone()
             mechanism = mech_row["mechanism"] if mech_row else None
             pair_scores.append(PairScore(
@@ -545,12 +581,13 @@ def regime_risk(req: RegimeRequest):
         similar_replacements: list[DrugReplacements] = []
         for drug in resolved:
             candidates = find_similar_replacements(conn, drug["id"], regime_set)
+            drug_num = _id_to_num(drug["id"])
             orig_count_row = conn.execute(
                 """
                 SELECT COUNT(*) AS cnt FROM interactions
-                WHERE drug_a_id = ? OR drug_b_id = ?
+                WHERE drug_a_num = ? OR drug_b_num = ?
                 """,
-                (drug["id"], drug["id"]),
+                (drug_num, drug_num),
             ).fetchone()
             orig_count = orig_count_row["cnt"] if orig_count_row else 0
             similar_replacements.append(DrugReplacements(
