@@ -203,6 +203,55 @@ const css = `
   .repl-count { font-family: var(--mono); font-size: 0.8rem; color: var(--subtext); text-align: right; }
   .repl-score-cell { text-align: right; white-space: nowrap; }
 
+  /* Food interactions */
+  .food-list { display: flex; flex-direction: column; }
+  .food-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .food-item:last-child { border-bottom: none; }
+  .food-item:hover { background: #15181f; }
+  .food-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .food-name {
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-transform: capitalize;
+  }
+  .severity-badge {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    border: 1px solid currentColor;
+    border-radius: 99px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+  .food-desc {
+    font-size: 0.8rem;
+    color: var(--subtext);
+    line-height: 1.5;
+    margin-bottom: 4px;
+  }
+  .food-mgmt {
+    font-size: 0.8rem;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .food-mgmt strong {
+    color: var(--blue);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    margin-right: 6px;
+  }
+
   .unknown-box {
     margin-top: 16px; background: #1f1210; border: 1px solid #4a1a1a;
     border-radius: var(--radius); padding: 12px 16px;
@@ -229,6 +278,12 @@ function riskColor(val, max) {
 
 function scoreColor(s) {
   return s >= 0.66 ? "#4ade80" : s >= 0.33 ? "#fb923c" : "#f87171";
+}
+
+function severityColor(sev) {
+  if (sev >= 4) return "#f87171";
+  if (sev >= 3) return "#fb923c";
+  return "#4ade80";
 }
 
 function useDebounce(value, delay) {
@@ -450,6 +505,45 @@ export default function App() {
                     })}
                   </tbody>
                 </table>
+              </>
+            )}
+
+            {/* Drug-food interactions */}
+            {result.food_interactions?.length > 0 && (
+              <>
+                <p className="section-title">Food Interactions</p>
+                <div className="replacements-grid">
+                  {result.food_interactions.map(group => (
+                    <div key={group.drug_id} className="replacement-group">
+                      <div className="replacement-group-header">
+                        <span className="drug-label">{group.drug_name}</span>
+                        <span className="drug-id-badge">{group.drug_id}</span>
+                        {group.foods.length > 0
+                          ? <span className="count-badge">{group.foods.length} food interaction{group.foods.length !== 1 ? "s" : ""}</span>
+                          : <span className="count-badge" style={{color:"var(--muted)",borderColor:"var(--border)",background:"transparent"}}>none found</span>
+                        }
+                      </div>
+                      {group.foods.length === 0 ? (
+                        <p className="no-replacements">No known food interactions for this drug.</p>
+                      ) : (
+                        <div className="food-list">
+                          {group.foods.map((f, i) => (
+                            <div key={i} className="food-item">
+                              <div className="food-item-header">
+                                <span className="food-name">{f.food_name}</span>
+                                <span className="severity-badge" style={{ color: severityColor(f.severity) }}>
+                                  Severity {f.severity}/5
+                                </span>
+                              </div>
+                              {f.description && <p className="food-desc">{f.description}</p>}
+                              {f.management && <p className="food-mgmt"><strong>Management</strong>{f.management}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </>
             )}
 
