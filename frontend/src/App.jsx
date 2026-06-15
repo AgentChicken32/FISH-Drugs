@@ -252,6 +252,31 @@ const css = `
     margin-right: 6px;
   }
 
+  /* Disease interactions */
+  .disease-list { display: flex; flex-direction: column; }
+  .disease-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .disease-item:last-child { border-bottom: none; }
+  .disease-item:hover { background: #15181f; }
+  .disease-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .disease-name {
+    font-weight: 600;
+    font-size: 0.875rem;
+  }
+  .disease-text {
+    font-size: 0.8rem;
+    color: var(--subtext);
+    line-height: 1.5;
+  }
+
   .unknown-box {
     margin-top: 16px; background: #1f1210; border: 1px solid #4a1a1a;
     border-radius: var(--radius); padding: 12px 16px;
@@ -505,6 +530,44 @@ export default function App() {
                     })}
                   </tbody>
                 </table>
+              </>
+            )}
+
+            {/* Drug-disease interactions */}
+            {result.disease_interactions?.length > 0 && (
+              <>
+                <p className="section-title">Disease Interactions</p>
+                <div className="replacements-grid">
+                  {result.disease_interactions.map(group => (
+                    <div key={group.drug_id} className="replacement-group">
+                      <div className="replacement-group-header">
+                        <span className="drug-label">{group.drug_name}</span>
+                        <span className="drug-id-badge">{group.drug_id}</span>
+                        {group.diseases.length > 0
+                          ? <span className="count-badge">{group.diseases.length} disease interaction{group.diseases.length !== 1 ? "s" : ""}</span>
+                          : <span className="count-badge" style={{color:"var(--muted)",borderColor:"var(--border)",background:"transparent"}}>none found</span>
+                        }
+                      </div>
+                      {group.diseases.length === 0 ? (
+                        <p className="no-replacements">No known disease interactions for this drug.</p>
+                      ) : (
+                        <div className="disease-list">
+                          {group.diseases.map((d, i) => (
+                            <div key={i} className="disease-item">
+                              <div className="disease-item-header">
+                                <span className="disease-name">{d.disease_name}</span>
+                                <span className="severity-badge" style={{ color: severityColor(d.severity) }}>
+                                  Severity {d.severity}/5
+                                </span>
+                              </div>
+                              {d.text && <p className="disease-text">{d.text}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </>
             )}
 
