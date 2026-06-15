@@ -134,12 +134,11 @@ def _init_schema(db_path: str, conn: sqlite3.Connection | None = None) -> None:
     close = conn is None
     if close:
         conn = sqlite3.connect(db_path)
-    # Drop both tables so a schema change always takes full effect on restart.
-    conn.executescript(
-        "DROP TABLE IF EXISTS interactions;"
-        "DROP TABLE IF EXISTS matching_scores;"
-        + _SCHEMA
-    )
+    # Drop and recreate only the interactions table on every startup so the
+    # CSV is always freshly imported.  matching_scores is intentionally kept
+    # across restarts — it is expensive to compute and is rebuilt by
+    # build_matching_scores() only when it is missing.
+    conn.executescript("DROP TABLE IF EXISTS interactions;" + _SCHEMA)
     conn.commit()
     if close:
         conn.close()

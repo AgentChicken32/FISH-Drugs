@@ -263,10 +263,15 @@ export default function App() {
   const debouncedQ = useDebounce(query, 200);
 
   useEffect(() => {
-    fetch(`${API_BASE}/health`)
-      .then(r => r.json())
-      .then(d => { setOnline(true); setDbCount(d.interactions); })
-      .catch(() => setOnline(false));
+    let cancelled = false;
+    const check = () => {
+      fetch(`${API_BASE}/health`)
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(d => { if (!cancelled) { setOnline(true); setDbCount(d.interactions); } })
+        .catch(() => { if (!cancelled) { setOnline(false); setTimeout(check, 3000); } });
+    };
+    check();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
