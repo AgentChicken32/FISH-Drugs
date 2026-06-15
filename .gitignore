@@ -19,6 +19,9 @@ dist/
 # VSCode
 .vscode/
 
+# Things we purposely want to exclude (usually test stuff)
+exclude/
+
 # Other unnecessary stuff
 *.json
 *.svg
