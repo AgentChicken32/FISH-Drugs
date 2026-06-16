@@ -664,6 +664,83 @@ export default function App() {
               </>
             )}
 
+            {/* Drug-disease interactions */}
+            {result.disease_interactions?.length > 0 && (
+              <>
+                <p className="section-title">Disease Interactions</p>
+                <div className="replacements-grid">
+                  {result.disease_interactions.map(group => (
+                    <div key={group.drug_id} className="replacement-group">
+                      <div className="replacement-group-header">
+                        <span className="drug-label">{group.drug_name}</span>
+                        <span className="drug-id-badge">{group.drug_id}</span>
+                        {group.diseases.length > 0
+                          ? <span className="count-badge">{group.diseases.length} disease interaction{group.diseases.length !== 1 ? "s" : ""}</span>
+                          : <span className="count-badge" style={{color:"var(--muted)",borderColor:"var(--border)",background:"transparent"}}>none found</span>
+                        }
+                      </div>
+                      {group.diseases.length === 0 ? (
+                        <p className="no-replacements">No known disease interactions for this drug.</p>
+                      ) : (
+                        <div className="disease-list">
+                          {group.diseases.map((d, i) => (
+                            <div key={i} className="disease-item">
+                              <div className="disease-item-header">
+                                <span className="disease-name">{d.disease_name}</span>
+                                <span className="severity-badge" style={{ color: severityColor(d.severity) }}>
+                                  Severity {d.severity}/5
+                                </span>
+                              </div>
+                              {d.text && <p className="disease-text">{d.text}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Drug-food interactions */}
+            {result.food_interactions?.length > 0 && (
+              <>
+                <p className="section-title">Food Interactions</p>
+                <div className="replacements-grid">
+                  {result.food_interactions.map(group => (
+                    <div key={group.drug_id} className="replacement-group">
+                      <div className="replacement-group-header">
+                        <span className="drug-label">{group.drug_name}</span>
+                        <span className="drug-id-badge">{group.drug_id}</span>
+                        {group.foods.length > 0
+                          ? <span className="count-badge">{group.foods.length} food interaction{group.foods.length !== 1 ? "s" : ""}</span>
+                          : <span className="count-badge" style={{color:"var(--muted)",borderColor:"var(--border)",background:"transparent"}}>none found</span>
+                        }
+                      </div>
+                      {group.foods.length === 0 ? (
+                        <p className="no-replacements">No known food interactions for this drug.</p>
+                      ) : (
+                        <div className="food-list">
+                          {group.foods.map((f, i) => (
+                            <div key={i} className="food-item">
+                              <div className="food-item-header">
+                                <span className="food-name">{f.food_name}</span>
+                                <span className="severity-badge" style={{ color: severityColor(f.severity) }}>
+                                  Severity {f.severity}/5
+                                </span>
+                              </div>
+                              {f.description && <p className="food-desc">{f.description}</p>}
+                              {f.management && <p className="food-mgmt"><strong>Management</strong>{f.management}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
             {/* Similar replacement suggestions */}
             {result.similar_replacements?.length > 0 && (
               <>

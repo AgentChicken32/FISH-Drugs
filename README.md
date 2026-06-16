@@ -46,6 +46,38 @@ DDInter001,Warfarin,DDInter003,Ibuprofen,0.72,Unknown,Blood
 - Column 7 (category) is parsed but not stored or used.
 - The DB is **fully rebuilt from the CSV on every server start**, so any change to the CSV takes effect on the next restart.
 
+### Drug-food interactions
+
+A CSV with a header row and the following columns:
+
+```
+Severity level, Food name, Description, Management, Mechanism, References, drug_id
+```
+
+- `Severity level` must be an integer (1–5). Rows where it isn't a valid
+  integer (e.g. `"No matching records"`) are skipped.
+- `drug_id` should match the drug ID values used in the interactions CSV
+  (e.g. `DDInter1075`).
+- `References` is read but not currently surfaced by the API.
+- The table is rebuilt from this CSV on every server start. If the file is
+  missing, food-interaction lookups simply return empty results.
+
+### Drug-disease interactions
+
+A CSV with a header row and the following columns:
+
+```
+Severity level, Disease name, Text, drug_id
+```
+
+- `Severity level` must be an integer (1–5). Rows where it isn't a valid
+  integer (e.g. `"No matching records"`) are skipped.
+- `drug_id` should match the drug ID values used in the interactions CSV
+  (e.g. `DDInter1075`).
+- `Text` describes the risk/contraindication for that disease.
+- The table is rebuilt from this CSV on every server start. If the file is
+  missing, disease-interaction lookups simply return empty results.
+
 ---
 
 ## Backend Setup
@@ -142,6 +174,23 @@ Score(A, B) = 2 × |neighbours(A) ∩ neighbours(B)| / (|neighbours(A)| + |neigh
 ```
 
 Scores are precomputed for all drug pairs at startup and cached in `matching_scores` (persists across restarts). The "Similar Drug Replacements" section lists drugs outside the regime with a matching score ≥ the `SIM_CUTOFF` threshold (default 90%), sorted by total interaction count.
+
+### Food interactions
+
+For every drug in the regime, the API looks up any known drug-food
+interactions and returns them sorted by severity (highest first). Each
+entry includes the food name, a severity score (1–5), a description of the
+interaction, the recommended management/mitigation, and the underlying
+mechanism (e.g. absorption, metabolism). Drugs with no known food
+interactions return an empty `foods` list.
+
+### Disease interactions
+
+For every drug in the regime, the API also looks up any known
+drug-disease (contraindication) warnings and returns them sorted by
+severity (highest first). Each entry includes the disease/condition name,
+a severity score (1–5), and a text description of the risk. Drugs with no
+known disease interactions return an empty `diseases` list.
 
 ---
 
