@@ -15,6 +15,7 @@ const css = `
     --blue:     #60a5fa;
     --warn:     #fb923c;
     --danger:   #f87171;
+    --purple:   #c084fc;
     --muted:    #6b7280;
     --text:     #e5e7eb;
     --subtext:  #9ca3af;
@@ -116,7 +117,6 @@ const css = `
     color: var(--muted); margin: 28px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
   }
 
-  /* Generic table base */
   .data-table { width: 100%; border-collapse: collapse; }
   .data-table th {
     font-family: var(--mono); font-size: 0.65rem; text-transform: uppercase;
@@ -140,52 +140,29 @@ const css = `
   .pair-names { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .pair-sep { color: var(--muted); font-size: 0.75rem; font-weight: 400; }
 
-  /* Replacement suggestions */
   .replacements-grid { display: flex; flex-direction: column; gap: 20px; }
 
   .replacement-group {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    overflow: hidden;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
   }
   .replacement-group-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 16px;
-    background: #0f1218;
-    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; background: #0f1218; border-bottom: 1px solid var(--border);
   }
-  .replacement-group-header .drug-label {
-    font-weight: 700;
-    font-size: 0.9rem;
-    color: var(--text);
-  }
+  .replacement-group-header .drug-label { font-weight: 700; font-size: 0.9rem; color: var(--text); }
   .replacement-group-header .drug-id-badge {
-    font-family: var(--mono);
-    font-size: 0.68rem;
-    color: var(--muted);
-    background: var(--border);
-    border-radius: 3px;
-    padding: 2px 6px;
+    font-family: var(--mono); font-size: 0.68rem; color: var(--muted);
+    background: var(--border); border-radius: 3px; padding: 2px 6px;
   }
   .replacement-group-header .count-badge {
-    margin-left: auto;
-    font-family: var(--mono);
-    font-size: 0.68rem;
-    color: var(--blue);
-    background: #0d1a2e;
-    border: 1px solid #1e3a5f;
-    border-radius: 99px;
-    padding: 2px 8px;
+    margin-left: auto; font-family: var(--mono); font-size: 0.68rem;
+    color: var(--blue); background: #0d1a2e; border: 1px solid #1e3a5f;
+    border-radius: 99px; padding: 2px 8px;
   }
   .no-replacements {
-    padding: 14px 16px;
-    font-family: var(--mono);
-    font-size: 0.75rem;
-    color: var(--muted);
-    font-style: italic;
+    padding: 14px 16px; font-family: var(--mono); font-size: 0.75rem;
+    color: var(--muted); font-style: italic;
   }
 
   .repl-table { width: 100%; border-collapse: collapse; }
@@ -203,6 +180,7 @@ const css = `
   .repl-count { font-family: var(--mono); font-size: 0.8rem; color: var(--subtext); text-align: right; }
   .repl-score-cell { text-align: right; white-space: nowrap; }
 
+<<<<<<< Updated upstream
   /* Food interactions */
   .food-list { display: flex; flex-direction: column; }
   .food-item {
@@ -275,6 +253,110 @@ const css = `
     font-size: 0.8rem;
     color: var(--subtext);
     line-height: 1.5;
+=======
+  .mech-badge {
+    display: inline-block; font-family: var(--mono); font-size: 0.65rem;
+    background: #0d1a2e; border: 1px solid #1e3a5f;
+    color: var(--blue); border-radius: 4px; padding: 2px 7px; white-space: nowrap;
+  }
+
+  /* ---- Drug row with popup buttons ---- */
+  .drug-row-buttons {
+    display: flex; gap: 6px; align-items: center;
+  }
+  .btn-pill {
+    font-family: var(--mono); font-size: 0.62rem; font-weight: 500;
+    border: 1px solid; border-radius: 99px; padding: 2px 9px;
+    cursor: pointer; transition: all 0.15s; background: transparent;
+    white-space: nowrap;
+  }
+  .btn-pill.food {
+    color: var(--warn); border-color: #7a4512;
+  }
+  .btn-pill.food:hover, .btn-pill.food.active {
+    background: #2a1a08; border-color: var(--warn);
+  }
+  .btn-pill.disease {
+    color: var(--purple); border-color: #5a2a7a;
+  }
+  .btn-pill.disease:hover, .btn-pill.disease.active {
+    background: #1e0f2e; border-color: var(--purple);
+  }
+  .btn-pill.none-badge {
+    color: var(--muted); border-color: var(--border); cursor: default; opacity: 0.5;
+  }
+
+  /* ---- Modal / popup overlay ---- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 500; animation: fadeIn 0.15s ease;
+    padding: 24px;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; width: 100%; max-width: 620px;
+    max-height: 80vh; display: flex; flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+    animation: slideUp 0.2s ease;
+  }
+  @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .modal-title { display: flex; align-items: center; gap: 10px; }
+  .modal-title h3 { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+  .modal-title .modal-drug-id {
+    font-family: var(--mono); font-size: 0.68rem; color: var(--muted);
+    background: var(--border); border-radius: 3px; padding: 2px 6px;
+  }
+  .modal-close {
+    background: none; border: none; color: var(--muted); font-size: 1.2rem;
+    cursor: pointer; line-height: 1; padding: 4px; transition: color 0.1s;
+  }
+  .modal-close:hover { color: var(--text); }
+
+  .modal-body {
+    overflow-y: auto; flex: 1; padding: 0;
+  }
+
+  /* Food items inside modal */
+  .modal-food-item {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+  }
+  .modal-food-item:last-child { border-bottom: none; }
+  .modal-item-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 6px;
+  }
+  .modal-item-name { font-weight: 600; font-size: 0.9rem; text-transform: capitalize; }
+  .severity-badge {
+    font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.04em;
+    border: 1px solid currentColor; border-radius: 99px; padding: 2px 8px; white-space: nowrap;
+  }
+  .modal-item-desc { font-size: 0.8rem; color: var(--subtext); line-height: 1.5; margin-bottom: 5px; }
+  .modal-item-mgmt { font-size: 0.8rem; color: var(--text); line-height: 1.5; }
+  .modal-item-mgmt strong {
+    color: var(--blue); font-weight: 600; text-transform: uppercase;
+    font-size: 0.65rem; letter-spacing: 0.06em; margin-right: 6px;
+  }
+
+  /* Disease items inside modal */
+  .modal-disease-item {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+  }
+  .modal-disease-item:last-child { border-bottom: none; }
+  .modal-disease-text { font-size: 0.8rem; color: var(--subtext); line-height: 1.55; }
+
+  .modal-empty {
+    padding: 32px 20px; font-family: var(--mono); font-size: 0.8rem;
+    color: var(--muted); text-align: center; font-style: italic;
+>>>>>>> Stashed changes
   }
 
   .unknown-box {
@@ -320,6 +402,69 @@ function useDebounce(value, delay) {
   return debounced;
 }
 
+// Modal component
+function InteractionModal({ drug, type, foodData, diseaseData, onClose }) {
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const isFood = type === "food";
+  const items = isFood ? (foodData?.foods ?? []) : (diseaseData?.diseases ?? []);
+  const accentColor = isFood ? "var(--warn)" : "var(--purple)";
+  const title = isFood ? "Food Interactions" : "Disease Interactions";
+
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal">
+        <div className="modal-header">
+          <div className="modal-title">
+            <span style={{ fontSize: "1rem" }}>{isFood ? "🍽️" : "🩺"}</span>
+            <h3 style={{ color: accentColor }}>{title}</h3>
+            <span style={{ fontWeight: 700, color: "var(--text)" }}>{drug.name}</span>
+            <span className="modal-drug-id">{drug.id}</span>
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="modal-body">
+          {items.length === 0 ? (
+            <p className="modal-empty">No known {isFood ? "food" : "disease"} interactions for this drug.</p>
+          ) : isFood ? (
+            items.map((f, i) => (
+              <div key={i} className="modal-food-item">
+                <div className="modal-item-header">
+                  <span className="modal-item-name">{f.food_name}</span>
+                  <span className="severity-badge" style={{ color: severityColor(f.severity) }}>
+                    Severity {f.severity}/5
+                  </span>
+                </div>
+                {f.description && <p className="modal-item-desc">{f.description}</p>}
+                {f.management && (
+                  <p className="modal-item-mgmt"><strong>Management</strong>{f.management}</p>
+                )}
+              </div>
+            ))
+          ) : (
+            items.map((d, i) => (
+              <div key={i} className="modal-disease-item">
+                <div className="modal-item-header">
+                  <span className="modal-item-name">{d.disease_name}</span>
+                  <span className="severity-badge" style={{ color: severityColor(d.severity) }}>
+                    Severity {d.severity}/5
+                  </span>
+                </div>
+                {d.text && <p className="modal-disease-text">{d.text}</p>}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [drugs, setDrugs]         = useState([]);
   const [query, setQuery]         = useState("");
@@ -330,8 +475,18 @@ export default function App() {
   const [error, setError]         = useState(null);
   const [online, setOnline]       = useState(null);
   const [dbCount, setDbCount]     = useState(null);
+<<<<<<< Updated upstream
   const inputRef = useRef(null);
   const debouncedQ = useDebounce(query, 200);
+=======
+
+  // Modal state: { drug: {id, name}, type: 'food'|'disease' } or null
+  const [modal, setModal] = useState(null);
+
+  const inputRef     = useRef(null);
+  const inputAreaRef = useRef(null);
+  const debouncedQ   = useDebounce(query, 200);
+>>>>>>> Stashed changes
 
   useEffect(() => {
     fetch(`${API_BASE}/health`)
@@ -370,7 +525,7 @@ export default function App() {
 
   const calculate = async () => {
     if (!drugs.length) return;
-    setLoading(true); setError(null); setResult(null);
+    setLoading(true); setError(null); setResult(null); setModal(null);
     try {
       const res = await fetch(`${API_BASE}/regime/risk`, {
         method: "POST",
@@ -383,9 +538,30 @@ export default function App() {
     finally { setLoading(false); }
   };
 
+<<<<<<< Updated upstream
   const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); };
+=======
+  useEffect(() => {
+    const handleMouseDown = (e) => {
+      if (inputAreaRef.current && !inputAreaRef.current.contains(e.target)) {
+        setSuggs([]);
+      }
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, []);
+
+  const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); setModal(null); };
+>>>>>>> Stashed changes
 
   const maxRisk = result ? Math.max(...result.drugs.map(d => d.risk), 0.001) : 1;
+
+  // Build lookup maps from result for modal
+  const foodMap    = result ? Object.fromEntries(result.food_interactions?.map(g => [g.drug_id, g]) ?? []) : {};
+  const diseaseMap = result ? Object.fromEntries(result.disease_interactions?.map(g => [g.drug_id, g]) ?? []) : {};
+
+  const openModal = (drug, type) => setModal({ drug, type });
+  const closeModal = () => setModal(null);
 
   return (
     <>
@@ -466,31 +642,60 @@ export default function App() {
               </div>
             </div>
 
-            {/* Individual drug risk */}
+            {/* Individual drug risk with food/disease buttons */}
             <p className="section-title">Individual Drug Risk</p>
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Drug</th>
                   <th>ID</th>
+                  <th>Interactions</th>
                   <th className="right">Risk (avg strength)</th>
                 </tr>
               </thead>
               <tbody>
-                {result.drugs.map(d => (
-                  <tr key={d.id}>
-                    <td className="drug-name-cell">{d.name}</td>
-                    <td className="drug-id-cell">{d.id}</td>
-                    <td>
-                      <div className="bar-wrap">
-                        <div className="bar">
-                          <div className="bar-fill" style={{ width: `${(d.risk / maxRisk) * 100}%`, background: riskColor(d.risk, maxRisk) }} />
+                {result.drugs.map(d => {
+                  const foodCount    = foodMap[d.id]?.foods?.length ?? 0;
+                  const diseaseCount = diseaseMap[d.id]?.diseases?.length ?? 0;
+                  return (
+                    <tr key={d.id}>
+                      <td className="drug-name-cell">{d.name}</td>
+                      <td className="drug-id-cell">{d.id}</td>
+                      <td>
+                        <div className="drug-row-buttons">
+                          {foodCount > 0 ? (
+                            <button
+                              className={`btn-pill food${modal?.drug.id === d.id && modal?.type === "food" ? " active" : ""}`}
+                              onClick={() => openModal(d, "food")}
+                            >
+                              🍽 {foodCount} food
+                            </button>
+                          ) : (
+                            <span className="btn-pill none-badge">🍽 none</span>
+                          )}
+                          {diseaseCount > 0 ? (
+                            <button
+                              className={`btn-pill disease${modal?.drug.id === d.id && modal?.type === "disease" ? " active" : ""}`}
+                              onClick={() => openModal(d, "disease")}
+                            >
+                              🩺 {diseaseCount} disease
+                            </button>
+                          ) : (
+                            <span className="btn-pill none-badge">🩺 none</span>
+                          )}
                         </div>
-                        {d.avg_strength !== null ? d.risk.toFixed(4) : <span className="no-data">no data</span>}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>
+                        <div className="bar-wrap">
+                          <div className="bar">
+                            <div className="bar-fill" style={{ width: `${(d.risk / maxRisk) * 100}%`, background: riskColor(d.risk, maxRisk) }} />
+                          </div>
+                          {d.avg_strength !== null ? d.risk.toFixed(4) : <span className="no-data">no data</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 
@@ -671,6 +876,17 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Modal */}
+      {modal && (
+        <InteractionModal
+          drug={modal.drug}
+          type={modal.type}
+          foodData={foodMap[modal.drug.id]}
+          diseaseData={diseaseMap[modal.drug.id]}
+          onClose={closeModal}
+        />
+      )}
     </>
   );
 }
