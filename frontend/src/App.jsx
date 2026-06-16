@@ -15,6 +15,7 @@ const css = `
     --blue:     #60a5fa;
     --warn:     #fb923c;
     --danger:   #f87171;
+    --purple:   #c084fc;
     --muted:    #6b7280;
     --text:     #e5e7eb;
     --subtext:  #9ca3af;
@@ -116,7 +117,6 @@ const css = `
     color: var(--muted); margin: 28px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
   }
 
-  /* Generic table base */
   .data-table { width: 100%; border-collapse: collapse; }
   .data-table th {
     font-family: var(--mono); font-size: 0.65rem; text-transform: uppercase;
@@ -140,52 +140,29 @@ const css = `
   .pair-names { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .pair-sep { color: var(--muted); font-size: 0.75rem; font-weight: 400; }
 
-  /* Replacement suggestions */
   .replacements-grid { display: flex; flex-direction: column; gap: 20px; }
 
   .replacement-group {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    overflow: hidden;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
   }
   .replacement-group-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 16px;
-    background: #0f1218;
-    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; background: #0f1218; border-bottom: 1px solid var(--border);
   }
-  .replacement-group-header .drug-label {
-    font-weight: 700;
-    font-size: 0.9rem;
-    color: var(--text);
-  }
+  .replacement-group-header .drug-label { font-weight: 700; font-size: 0.9rem; color: var(--text); }
   .replacement-group-header .drug-id-badge {
-    font-family: var(--mono);
-    font-size: 0.68rem;
-    color: var(--muted);
-    background: var(--border);
-    border-radius: 3px;
-    padding: 2px 6px;
+    font-family: var(--mono); font-size: 0.68rem; color: var(--muted);
+    background: var(--border); border-radius: 3px; padding: 2px 6px;
   }
   .replacement-group-header .count-badge {
-    margin-left: auto;
-    font-family: var(--mono);
-    font-size: 0.68rem;
-    color: var(--blue);
-    background: #0d1a2e;
-    border: 1px solid #1e3a5f;
-    border-radius: 99px;
-    padding: 2px 8px;
+    margin-left: auto; font-family: var(--mono); font-size: 0.68rem;
+    color: var(--blue); background: #0d1a2e; border: 1px solid #1e3a5f;
+    border-radius: 99px; padding: 2px 8px;
   }
   .no-replacements {
-    padding: 14px 16px;
-    font-family: var(--mono);
-    font-size: 0.75rem;
-    color: var(--muted);
-    font-style: italic;
+    padding: 14px 16px; font-family: var(--mono); font-size: 0.75rem;
+    color: var(--muted); font-style: italic;
   }
 
   .repl-table { width: 100%; border-collapse: collapse; }
@@ -239,6 +216,12 @@ function scoreColor(s) {
   return s >= 0.66 ? "#4ade80" : s >= 0.33 ? "#fb923c" : "#f87171";
 }
 
+function severityColor(sev) {
+  if (sev >= 4) return "#f87171";
+  if (sev >= 3) return "#fb923c";
+  return "#4ade80";
+}
+
 function useDebounce(value, delay) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -246,6 +229,69 @@ function useDebounce(value, delay) {
     return () => clearTimeout(t);
   }, [value, delay]);
   return debounced;
+}
+
+// Modal component
+function InteractionModal({ drug, type, foodData, diseaseData, onClose }) {
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const isFood = type === "food";
+  const items = isFood ? (foodData?.foods ?? []) : (diseaseData?.diseases ?? []);
+  const accentColor = isFood ? "var(--warn)" : "var(--purple)";
+  const title = isFood ? "Food Interactions" : "Disease Interactions";
+
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal">
+        <div className="modal-header">
+          <div className="modal-title">
+            <span style={{ fontSize: "1rem" }}>{isFood ? "🍽️" : "🩺"}</span>
+            <h3 style={{ color: accentColor }}>{title}</h3>
+            <span style={{ fontWeight: 700, color: "var(--text)" }}>{drug.name}</span>
+            <span className="modal-drug-id">{drug.id}</span>
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="modal-body">
+          {items.length === 0 ? (
+            <p className="modal-empty">No known {isFood ? "food" : "disease"} interactions for this drug.</p>
+          ) : isFood ? (
+            items.map((f, i) => (
+              <div key={i} className="modal-food-item">
+                <div className="modal-item-header">
+                  <span className="modal-item-name">{f.food_name}</span>
+                  <span className="severity-badge" style={{ color: severityColor(f.severity) }}>
+                    Severity {f.severity}/5
+                  </span>
+                </div>
+                {f.description && <p className="modal-item-desc">{f.description}</p>}
+                {f.management && (
+                  <p className="modal-item-mgmt"><strong>Management</strong>{f.management}</p>
+                )}
+              </div>
+            ))
+          ) : (
+            items.map((d, i) => (
+              <div key={i} className="modal-disease-item">
+                <div className="modal-item-header">
+                  <span className="modal-item-name">{d.disease_name}</span>
+                  <span className="severity-badge" style={{ color: severityColor(d.severity) }}>
+                    Severity {d.severity}/5
+                  </span>
+                </div>
+                {d.text && <p className="modal-disease-text">{d.text}</p>}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -304,7 +350,7 @@ export default function App() {
 
   const calculate = async () => {
     if (!drugs.length) return;
-    setLoading(true); setError(null); setResult(null);
+    setLoading(true); setError(null); setResult(null); setModal(null);
     try {
       const res = await fetch(`${API_BASE}/regime/risk`, {
         method: "POST",
@@ -331,6 +377,13 @@ export default function App() {
   const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); };
 
   const maxRisk = result ? Math.max(...result.drugs.map(d => d.risk), 0.001) : 1;
+
+  // Build lookup maps from result for modal
+  const foodMap    = result ? Object.fromEntries(result.food_interactions?.map(g => [g.drug_id, g]) ?? []) : {};
+  const diseaseMap = result ? Object.fromEntries(result.disease_interactions?.map(g => [g.drug_id, g]) ?? []) : {};
+
+  const openModal = (drug, type) => setModal({ drug, type });
+  const closeModal = () => setModal(null);
 
   return (
     <>
@@ -411,31 +464,60 @@ export default function App() {
               </div>
             </div>
 
-            {/* Individual drug risk */}
+            {/* Individual drug risk with food/disease buttons */}
             <p className="section-title">Individual Drug Risk</p>
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Drug</th>
                   <th>ID</th>
+                  <th>Interactions</th>
                   <th className="right">Risk (avg strength)</th>
                 </tr>
               </thead>
               <tbody>
-                {result.drugs.map(d => (
-                  <tr key={d.id}>
-                    <td className="drug-name-cell">{d.name}</td>
-                    <td className="drug-id-cell">{d.id}</td>
-                    <td>
-                      <div className="bar-wrap">
-                        <div className="bar">
-                          <div className="bar-fill" style={{ width: `${(d.risk / maxRisk) * 100}%`, background: riskColor(d.risk, maxRisk) }} />
+                {result.drugs.map(d => {
+                  const foodCount    = foodMap[d.id]?.foods?.length ?? 0;
+                  const diseaseCount = diseaseMap[d.id]?.diseases?.length ?? 0;
+                  return (
+                    <tr key={d.id}>
+                      <td className="drug-name-cell">{d.name}</td>
+                      <td className="drug-id-cell">{d.id}</td>
+                      <td>
+                        <div className="drug-row-buttons">
+                          {foodCount > 0 ? (
+                            <button
+                              className={`btn-pill food${modal?.drug.id === d.id && modal?.type === "food" ? " active" : ""}`}
+                              onClick={() => openModal(d, "food")}
+                            >
+                              🍽 {foodCount} food
+                            </button>
+                          ) : (
+                            <span className="btn-pill none-badge">🍽 none</span>
+                          )}
+                          {diseaseCount > 0 ? (
+                            <button
+                              className={`btn-pill disease${modal?.drug.id === d.id && modal?.type === "disease" ? " active" : ""}`}
+                              onClick={() => openModal(d, "disease")}
+                            >
+                              🩺 {diseaseCount} disease
+                            </button>
+                          ) : (
+                            <span className="btn-pill none-badge">🩺 none</span>
+                          )}
                         </div>
-                        {d.avg_strength !== null ? d.risk.toFixed(4) : <span className="no-data">no data</span>}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>
+                        <div className="bar-wrap">
+                          <div className="bar">
+                            <div className="bar-fill" style={{ width: `${(d.risk / maxRisk) * 100}%`, background: riskColor(d.risk, maxRisk) }} />
+                          </div>
+                          {d.avg_strength !== null ? d.risk.toFixed(4) : <span className="no-data">no data</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 
@@ -480,6 +562,83 @@ export default function App() {
                     })}
                   </tbody>
                 </table>
+              </>
+            )}
+
+            {/* Drug-disease interactions */}
+            {result.disease_interactions?.length > 0 && (
+              <>
+                <p className="section-title">Disease Interactions</p>
+                <div className="replacements-grid">
+                  {result.disease_interactions.map(group => (
+                    <div key={group.drug_id} className="replacement-group">
+                      <div className="replacement-group-header">
+                        <span className="drug-label">{group.drug_name}</span>
+                        <span className="drug-id-badge">{group.drug_id}</span>
+                        {group.diseases.length > 0
+                          ? <span className="count-badge">{group.diseases.length} disease interaction{group.diseases.length !== 1 ? "s" : ""}</span>
+                          : <span className="count-badge" style={{color:"var(--muted)",borderColor:"var(--border)",background:"transparent"}}>none found</span>
+                        }
+                      </div>
+                      {group.diseases.length === 0 ? (
+                        <p className="no-replacements">No known disease interactions for this drug.</p>
+                      ) : (
+                        <div className="disease-list">
+                          {group.diseases.map((d, i) => (
+                            <div key={i} className="disease-item">
+                              <div className="disease-item-header">
+                                <span className="disease-name">{d.disease_name}</span>
+                                <span className="severity-badge" style={{ color: severityColor(d.severity) }}>
+                                  Severity {d.severity}/5
+                                </span>
+                              </div>
+                              {d.text && <p className="disease-text">{d.text}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Drug-food interactions */}
+            {result.food_interactions?.length > 0 && (
+              <>
+                <p className="section-title">Food Interactions</p>
+                <div className="replacements-grid">
+                  {result.food_interactions.map(group => (
+                    <div key={group.drug_id} className="replacement-group">
+                      <div className="replacement-group-header">
+                        <span className="drug-label">{group.drug_name}</span>
+                        <span className="drug-id-badge">{group.drug_id}</span>
+                        {group.foods.length > 0
+                          ? <span className="count-badge">{group.foods.length} food interaction{group.foods.length !== 1 ? "s" : ""}</span>
+                          : <span className="count-badge" style={{color:"var(--muted)",borderColor:"var(--border)",background:"transparent"}}>none found</span>
+                        }
+                      </div>
+                      {group.foods.length === 0 ? (
+                        <p className="no-replacements">No known food interactions for this drug.</p>
+                      ) : (
+                        <div className="food-list">
+                          {group.foods.map((f, i) => (
+                            <div key={i} className="food-item">
+                              <div className="food-item-header">
+                                <span className="food-name">{f.food_name}</span>
+                                <span className="severity-badge" style={{ color: severityColor(f.severity) }}>
+                                  Severity {f.severity}/5
+                                </span>
+                              </div>
+                              {f.description && <p className="food-desc">{f.description}</p>}
+                              {f.management && <p className="food-mgmt"><strong>Management</strong>{f.management}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </>
             )}
 
@@ -544,6 +703,17 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Modal */}
+      {modal && (
+        <InteractionModal
+          drug={modal.drug}
+          type={modal.type}
+          foodData={foodMap[modal.drug.id]}
+          diseaseData={diseaseMap[modal.drug.id]}
+          onClose={closeModal}
+        />
+      )}
     </>
   );
 }

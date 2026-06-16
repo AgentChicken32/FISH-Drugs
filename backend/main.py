@@ -20,9 +20,11 @@ from pydantic import BaseModel
 # Config
 # ---------------------------------------------------------------------------
 
-CSV_PATH          = os.environ.get("DRUG_CSV",           "interactions.csv")
-DB_PATH           = os.environ.get("DRUG_DB",            "interactions.db")
-SIMILARITY_CUTOFF = float(os.environ.get("SIM_CUTOFF",   "0.90"))
+CSV_PATH          = os.environ.get("DRUG_CSV",     "interactions.csv")
+FOOD_CSV_PATH     = os.environ.get("FOOD_CSV",     "drug_food.csv")
+DISEASE_CSV_PATH  = os.environ.get("DISEASE_CSV",  "drug_disease.csv")
+DB_PATH           = os.environ.get("DRUG_DB",      "interactions.db")
+SIMILARITY_CUTOFF = float(os.environ.get("SIM_CUTOFF", "0.90"))
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -130,6 +132,11 @@ def _id_to_num(drug_id: str) -> int:
     return int(drug_id[7:])  # 'DDInter' is 7 characters
 
 
+def _id_to_num(drug_id: str) -> int:
+    """Strip the 'DDInter' prefix and return the integer drug number."""
+    return int(drug_id[7:])  # 'DDInter' is 7 characters
+
+
 def _init_schema(db_path: str, conn: sqlite3.Connection | None = None) -> None:
     close = conn is None
     if close:
@@ -148,6 +155,168 @@ def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+# ---------------------------------------------------------------------------
+# Drug-food interaction loading
+# ---------------------------------------------------------------------------
+
+_FOOD_SCHEMA = """
+CREATE TABLE IF NOT EXISTS food_interactions (
+    drug_id     TEXT NOT NULL,
+    food_name   TEXT NOT NULL,
+    severity    INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    management  TEXT NOT NULL,
+    mechanism   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_food_drug ON food_interactions(drug_id);
+"""
+
+_FOOD_INSERT_SQL = """
+INSERT INTO food_interactions (drug_id, food_name, severity, description, management, mechanism)
+VALUES (?, ?, ?, ?, ?, ?)
+"""
+
+
+def build_food_database(csv_path: str, db_path: str) -> None:
+    """
+    Load drug-food interactions from CSV into the food_interactions table.
+    Rows whose 'Severity level' is not a valid integer (e.g. "No matching
+    records") are skipped. Drops and rebuilds the table on every run.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript("DROP TABLE IF EXISTS food_interactions;" + _FOOD_SCHEMA)
+        conn.commit()
+
+        if not Path(csv_path).exists():
+            print(f"[warn] Food CSV not found at '{csv_path}' — food interactions disabled.", file=sys.stderr)
+            return
+
+        cur = conn.cursor()
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            batch = []
+            skipped = 0
+            for row in reader:
+                sev_raw = (row.get("Severity level") or "").strip()
+                try:
+                    severity = int(sev_raw)
+                except ValueError:
+                    skipped += 1
+                    continue
+                drug_id = (row.get("drug_id") or "").strip()
+                if not drug_id:
+                    continue
+                batch.append((
+                    drug_id,
+                    (row.get("Food name") or "").strip(),
+                    severity,
+                    (row.get("Description") or "").strip(),
+                    (row.get("Management") or "").strip(),
+                    (row.get("Mechanism") or "").strip(),
+                ))
+            if batch:
+                cur.executemany(_FOOD_INSERT_SQL, batch)
+
+        conn.commit()
+        count = conn.execute("SELECT COUNT(*) FROM food_interactions").fetchone()[0]
+        print(f"[info] Loaded {count:,} drug-food interactions into '{db_path}' ({skipped:,} rows skipped).")
+    finally:
+        conn.close()
+
+
+def get_food_interactions(conn: sqlite3.Connection, drug_id: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT food_name, severity, description, management, mechanism
+        FROM food_interactions
+        WHERE drug_id = ?
+        ORDER BY severity DESC, food_name ASC
+        """,
+        (drug_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Drug-disease interaction loading
+# ---------------------------------------------------------------------------
+
+_DISEASE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS disease_interactions (
+    drug_id      TEXT NOT NULL,
+    disease_name TEXT NOT NULL,
+    severity     INTEGER NOT NULL,
+    text         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_disease_drug ON disease_interactions(drug_id);
+"""
+
+_DISEASE_INSERT_SQL = """
+INSERT INTO disease_interactions (drug_id, disease_name, severity, text)
+VALUES (?, ?, ?, ?)
+"""
+
+
+def build_disease_database(csv_path: str, db_path: str) -> None:
+    """
+    Load drug-disease interactions from CSV into the disease_interactions
+    table. Rows whose 'Severity level' is not a valid integer (e.g. "No
+    matching records") are skipped. Drops and rebuilds the table on every run.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript("DROP TABLE IF EXISTS disease_interactions;" + _DISEASE_SCHEMA)
+        conn.commit()
+
+        if not Path(csv_path).exists():
+            print(f"[warn] Disease CSV not found at '{csv_path}' — disease interactions disabled.", file=sys.stderr)
+            return
+
+        cur = conn.cursor()
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            batch = []
+            skipped = 0
+            for row in reader:
+                sev_raw = (row.get("Severity level") or "").strip()
+                try:
+                    severity = int(sev_raw)
+                except ValueError:
+                    skipped += 1
+                    continue
+                drug_id = (row.get("drug_id") or "").strip()
+                if not drug_id:
+                    continue
+                batch.append((
+                    drug_id,
+                    (row.get("Disease name") or "").strip(),
+                    severity,
+                    (row.get("Text") or "").strip(),
+                ))
+            if batch:
+                cur.executemany(_DISEASE_INSERT_SQL, batch)
+
+        conn.commit()
+        count = conn.execute("SELECT COUNT(*) FROM disease_interactions").fetchone()[0]
+        print(f"[info] Loaded {count:,} drug-disease interactions into '{db_path}' ({skipped:,} rows skipped).")
+    finally:
+        conn.close()
+
+
+def get_disease_interactions(conn: sqlite3.Connection, drug_id: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT disease_name, severity, text
+        FROM disease_interactions
+        WHERE drug_id = ?
+        ORDER BY severity DESC, disease_name ASC
+        """,
+        (drug_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +584,172 @@ def search_drugs(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[
 
 
 # ---------------------------------------------------------------------------
+# Drug-food interaction loading
+# ---------------------------------------------------------------------------
+
+_FOOD_SCHEMA = """
+CREATE TABLE IF NOT EXISTS food_interactions (
+    drug_num    INTEGER NOT NULL,
+    food_name   TEXT    NOT NULL,
+    severity    INTEGER NOT NULL,
+    description TEXT    NOT NULL,
+    management  TEXT    NOT NULL,
+    mechanism   TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_food_drug ON food_interactions(drug_num);
+"""
+
+_FOOD_INSERT_SQL = """
+INSERT INTO food_interactions (drug_num, food_name, severity, description, management, mechanism)
+VALUES (?, ?, ?, ?, ?, ?)
+"""
+
+
+def build_food_database(csv_path: str, db_path: str) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript("DROP TABLE IF EXISTS food_interactions;" + _FOOD_SCHEMA)
+        conn.commit()
+
+        if not Path(csv_path).exists():
+            print(f"[warn] Food CSV not found at '{csv_path}' — food interactions disabled.", file=sys.stderr)
+            return
+
+        cur = conn.cursor()
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            batch = []
+            skipped = 0
+            for row in reader:
+                sev_raw = (row.get("Severity level") or "").strip()
+                try:
+                    severity = int(sev_raw)
+                except ValueError:
+                    skipped += 1
+                    continue
+                drug_id_str = (row.get("drug_id") or "").strip()
+                if not drug_id_str or not drug_id_str.upper().startswith("DDINTER"):
+                    skipped += 1
+                    continue
+                try:
+                    drug_num = _id_to_num(drug_id_str)
+                except (ValueError, IndexError):
+                    skipped += 1
+                    continue
+                batch.append((
+                    drug_num,
+                    (row.get("Food name") or "").strip(),
+                    severity,
+                    (row.get("Description") or "").strip(),
+                    (row.get("Management") or "").strip(),
+                    (row.get("Mechanism") or "").strip(),
+                ))
+            if batch:
+                cur.executemany(_FOOD_INSERT_SQL, batch)
+
+        conn.commit()
+        count = conn.execute("SELECT COUNT(*) FROM food_interactions").fetchone()[0]
+        print(f"[info] Loaded {count:,} drug-food interactions ({skipped:,} rows skipped).")
+    finally:
+        conn.close()
+
+
+def get_food_interactions(conn: sqlite3.Connection, drug_id: str) -> list[dict]:
+    drug_num = _id_to_num(drug_id)
+    rows = conn.execute(
+        """
+        SELECT food_name, severity, description, management, mechanism
+        FROM food_interactions
+        WHERE drug_num = ?
+        ORDER BY severity DESC, food_name ASC
+        """,
+        (drug_num,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Drug-disease interaction loading
+# ---------------------------------------------------------------------------
+
+_DISEASE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS disease_interactions (
+    drug_num     INTEGER NOT NULL,
+    disease_name TEXT    NOT NULL,
+    severity     INTEGER NOT NULL,
+    text         TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_disease_drug ON disease_interactions(drug_num);
+"""
+
+_DISEASE_INSERT_SQL = """
+INSERT INTO disease_interactions (drug_num, disease_name, severity, text)
+VALUES (?, ?, ?, ?)
+"""
+
+
+def build_disease_database(csv_path: str, db_path: str) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript("DROP TABLE IF EXISTS disease_interactions;" + _DISEASE_SCHEMA)
+        conn.commit()
+
+        if not Path(csv_path).exists():
+            print(f"[warn] Disease CSV not found at '{csv_path}' — disease interactions disabled.", file=sys.stderr)
+            return
+
+        cur = conn.cursor()
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            batch = []
+            skipped = 0
+            for row in reader:
+                sev_raw = (row.get("Severity level") or "").strip()
+                try:
+                    severity = int(sev_raw)
+                except ValueError:
+                    skipped += 1
+                    continue
+                drug_id_str = (row.get("drug_id") or "").strip()
+                if not drug_id_str or not drug_id_str.upper().startswith("DDINTER"):
+                    skipped += 1
+                    continue
+                try:
+                    drug_num = _id_to_num(drug_id_str)
+                except (ValueError, IndexError):
+                    skipped += 1
+                    continue
+                batch.append((
+                    drug_num,
+                    (row.get("Disease name") or "").strip(),
+                    severity,
+                    (row.get("Text") or "").strip(),
+                ))
+            if batch:
+                cur.executemany(_DISEASE_INSERT_SQL, batch)
+
+        conn.commit()
+        count = conn.execute("SELECT COUNT(*) FROM disease_interactions").fetchone()[0]
+        print(f"[info] Loaded {count:,} drug-disease interactions ({skipped:,} rows skipped).")
+    finally:
+        conn.close()
+
+
+def get_disease_interactions(conn: sqlite3.Connection, drug_id: str) -> list[dict]:
+    drug_num = _id_to_num(drug_id)
+    rows = conn.execute(
+        """
+        SELECT disease_name, severity, text
+        FROM disease_interactions
+        WHERE drug_num = ?
+        ORDER BY severity DESC, disease_name ASC
+        """,
+        (drug_num,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 
@@ -422,6 +757,8 @@ def search_drugs(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[
 async def lifespan(app: FastAPI):
     build_database(CSV_PATH, DB_PATH)
     build_matching_scores(DB_PATH)
+    build_food_database(FOOD_CSV_PATH, DB_PATH)
+    build_disease_database(DISEASE_CSV_PATH, DB_PATH)
     yield
 
 
@@ -462,8 +799,8 @@ class PairScore(BaseModel):
 class ReplacementCandidate(BaseModel):
     id:                str
     name:              str
-    score:             float   # matching score vs the original drug
-    interaction_count: int     # total interactions in the DB
+    score:             float
+    interaction_count: int
 
 
 class DrugReplacements(BaseModel):
@@ -474,15 +811,17 @@ class DrugReplacements(BaseModel):
 
 
 class RegimeResponse(BaseModel):
-    drugs: list[DrugRisk]
-    total_risk: float
-    normalized_risk: float
-    populated_edges: int
-    possible_edges: int
-    coverage_pct: float
-    unknown_drugs: list[str]
-    pair_scores: list[PairScore]
-    similar_replacements: list[DrugReplacements]   # ← new
+    drugs:                list[DrugRisk]
+    total_risk:           float
+    normalized_risk:      float
+    populated_edges:      int
+    possible_edges:       int
+    coverage_pct:         float
+    unknown_drugs:        list[str]
+    pair_scores:          list[PairScore]
+    similar_replacements: list[DrugReplacements]
+    food_interactions:    list[DrugFoodInteractions]
+    disease_interactions: list[DrugDiseaseInteractions]
 
 
 # ---------------------------------------------------------------------------
@@ -544,15 +883,14 @@ def regime_risk(req: RegimeRequest):
         n = len(drug_risks)
         normalized_risk = total_risk / n if n > 0 else 0.0
 
-        ids   = [d.id   for d in drug_risks]
-        names = {d.id: d.name for d in drug_risks}
+        ids        = [d.id   for d in drug_risks]
+        names      = {d.id: d.name for d in drug_risks}
         regime_set = set(ids)
-        pairs = list(itertools.combinations(ids, 2))
-        possible  = len(pairs)
-        populated = sum(1 for a, b in pairs if pair_has_interaction(conn, a, b))
-        coverage  = (populated / possible * 100) if possible > 0 else 0.0
+        pairs      = list(itertools.combinations(ids, 2))
+        possible   = len(pairs)
+        populated  = sum(1 for a, b in pairs if pair_has_interaction(conn, a, b))
+        coverage   = (populated / possible * 100) if possible > 0 else 0.0
 
-        # Pairwise matching scores within the regime
         pair_scores: list[PairScore] = []
         for id_a, id_b in pairs:
             score = get_matching_score(conn, id_a, id_b)
@@ -576,7 +914,6 @@ def regime_risk(req: RegimeRequest):
                 mechanism=mechanism,
             ))
 
-        # Similar-drug replacement suggestions (outside the regime)
         similar_replacements: list[DrugReplacements] = []
         for drug in resolved:
             candidates = find_similar_replacements(conn, drug["id"], regime_set)
@@ -608,6 +945,8 @@ def regime_risk(req: RegimeRequest):
             unknown_drugs=unknown,
             pair_scores=pair_scores,
             similar_replacements=similar_replacements,
+            food_interactions=food_interactions,
+            disease_interactions=disease_interactions,
         )
     finally:
         conn.close()
