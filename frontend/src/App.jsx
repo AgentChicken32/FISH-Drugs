@@ -180,80 +180,6 @@ const css = `
   .repl-count { font-family: var(--mono); font-size: 0.8rem; color: var(--subtext); text-align: right; }
   .repl-score-cell { text-align: right; white-space: nowrap; }
 
-<<<<<<< Updated upstream
-  /* Food interactions */
-  .food-list { display: flex; flex-direction: column; }
-  .food-item {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  .food-item:last-child { border-bottom: none; }
-  .food-item:hover { background: #15181f; }
-  .food-item-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 6px;
-  }
-  .food-name {
-    font-weight: 600;
-    font-size: 0.875rem;
-    text-transform: capitalize;
-  }
-  .severity-badge {
-    font-family: var(--mono);
-    font-size: 0.65rem;
-    letter-spacing: 0.04em;
-    border: 1px solid currentColor;
-    border-radius: 99px;
-    padding: 2px 8px;
-    white-space: nowrap;
-  }
-  .food-desc {
-    font-size: 0.8rem;
-    color: var(--subtext);
-    line-height: 1.5;
-    margin-bottom: 4px;
-  }
-  .food-mgmt {
-    font-size: 0.8rem;
-    color: var(--text);
-    line-height: 1.5;
-  }
-  .food-mgmt strong {
-    color: var(--blue);
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 0.65rem;
-    letter-spacing: 0.06em;
-    margin-right: 6px;
-  }
-
-  /* Disease interactions */
-  .disease-list { display: flex; flex-direction: column; }
-  .disease-item {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  .disease-item:last-child { border-bottom: none; }
-  .disease-item:hover { background: #15181f; }
-  .disease-item-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 6px;
-  }
-  .disease-name {
-    font-weight: 600;
-    font-size: 0.875rem;
-  }
-  .disease-text {
-    font-size: 0.8rem;
-    color: var(--subtext);
-    line-height: 1.5;
-=======
   .mech-badge {
     display: inline-block; font-family: var(--mono); font-size: 0.65rem;
     background: #0d1a2e; border: 1px solid #1e3a5f;
@@ -356,7 +282,6 @@ const css = `
   .modal-empty {
     padding: 32px 20px; font-family: var(--mono); font-size: 0.8rem;
     color: var(--muted); text-align: center; font-style: italic;
->>>>>>> Stashed changes
   }
 
   .unknown-box {
@@ -475,10 +400,6 @@ export default function App() {
   const [error, setError]         = useState(null);
   const [online, setOnline]       = useState(null);
   const [dbCount, setDbCount]     = useState(null);
-<<<<<<< Updated upstream
-  const inputRef = useRef(null);
-  const debouncedQ = useDebounce(query, 200);
-=======
 
   // Modal state: { drug: {id, name}, type: 'food'|'disease' } or null
   const [modal, setModal] = useState(null);
@@ -486,7 +407,6 @@ export default function App() {
   const inputRef     = useRef(null);
   const inputAreaRef = useRef(null);
   const debouncedQ   = useDebounce(query, 200);
->>>>>>> Stashed changes
 
   useEffect(() => {
     fetch(`${API_BASE}/health`)
@@ -538,9 +458,6 @@ export default function App() {
     finally { setLoading(false); }
   };
 
-<<<<<<< Updated upstream
-  const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); };
-=======
   useEffect(() => {
     const handleMouseDown = (e) => {
       if (inputAreaRef.current && !inputAreaRef.current.contains(e.target)) {
@@ -552,7 +469,6 @@ export default function App() {
   }, []);
 
   const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); setModal(null); };
->>>>>>> Stashed changes
 
   const maxRisk = result ? Math.max(...result.drugs.map(d => d.risk), 0.001) : 1;
 

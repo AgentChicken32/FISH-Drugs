@@ -20,19 +20,11 @@ from pydantic import BaseModel
 # Config
 # ---------------------------------------------------------------------------
 
-<<<<<<< Updated upstream
-CSV_PATH          = os.environ.get("DRUG_CSV",           "interactions.csv")
-FOOD_CSV_PATH     = os.environ.get("FOOD_CSV",           "drug_food.csv")
-DISEASE_CSV_PATH  = os.environ.get("DISEASE_CSV",        "drug_disease.csv")
-DB_PATH           = os.environ.get("DRUG_DB",            "interactions.db")
-SIMILARITY_CUTOFF = float(os.environ.get("SIM_CUTOFF",   "0.90"))
-=======
 CSV_PATH          = os.environ.get("DRUG_CSV",     "interactions.csv")
 FOOD_CSV_PATH     = os.environ.get("FOOD_CSV",     "drug_food.csv")
 DISEASE_CSV_PATH  = os.environ.get("DISEASE_CSV",  "drug_disease.csv")
 DB_PATH           = os.environ.get("DRUG_DB",      "interactions.db")
 SIMILARITY_CUTOFF = float(os.environ.get("SIM_CUTOFF", "0.90"))
->>>>>>> Stashed changes
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -120,14 +112,11 @@ CREATE TABLE IF NOT EXISTS matching_scores (
 CREATE INDEX IF NOT EXISTS idx_ms_a ON matching_scores(drug_a_id);
 CREATE INDEX IF NOT EXISTS idx_ms_b ON matching_scores(drug_b_id);
 """
-<<<<<<< Updated upstream
-=======
 
 
 def _id_to_num(drug_id: str) -> int:
     """Strip the 'DDInter' prefix and return the integer drug number."""
     return int(drug_id[7:])  # 'DDInter' is 7 characters
->>>>>>> Stashed changes
 
 
 def _init_schema(db_path: str, conn: sqlite3.Connection | None = None) -> None:
@@ -316,11 +305,8 @@ def build_matching_scores(db_path: str) -> None:
     """
     Compute Sørensen-Dice matching scores for every pair of drugs and persist
     them into matching_scores.  Skipped if the table already has rows.
-<<<<<<< Updated upstream
 
     Score(A, B) = 2 * |neighbors(A) ∩ neighbors(B)| / (|neighbors(A)| + |neighbors(B)|)
-=======
->>>>>>> Stashed changes
     """
     conn = sqlite3.connect(db_path)
     try:
@@ -344,18 +330,11 @@ def build_matching_scores(db_path: str) -> None:
 
         neighbors: dict[str, set[str]] = {}
         for row in rows:
-<<<<<<< Updated upstream
-            drug_id, neighbor = row[0], row[1]
-            if drug_id not in neighbors:
-                neighbors[drug_id] = set()
-            neighbors[drug_id].add(neighbor)
-=======
             drug_num     = row[0]
             neighbor_num = row[1]
             if drug_num not in neighbors:
                 neighbors[drug_num] = set()
             neighbors[drug_num].add(neighbor_num)
->>>>>>> Stashed changes
 
         drugs = list(neighbors.keys())
         total_pairs = len(drugs) * (len(drugs) - 1) // 2
@@ -414,16 +393,7 @@ def find_similar_replacements(
     regime_ids: set[str],
     cutoff: float = SIMILARITY_CUTOFF,
 ) -> list[dict]:
-<<<<<<< Updated upstream
-    """
-    Return all drugs outside the regime whose matching score with `drug_id`
-    is >= cutoff, sorted by their total interaction count (descending).
-
-    Each result dict: {id, name, score, interaction_count}
-    """
-=======
     drug_num = _id_to_num(drug_id)
->>>>>>> Stashed changes
     rows = conn.execute(
         """
         SELECT
@@ -475,17 +445,6 @@ def find_similar_replacements(
 # Risk calculation helpers
 # ---------------------------------------------------------------------------
 
-<<<<<<< Updated upstream
-def drug_avg_strength(conn: sqlite3.Connection, drug_id: str) -> float | None:
-    row = conn.execute(
-        """
-        SELECT AVG(strength) AS avg_s
-        FROM interactions
-        WHERE drug_a_id = ? OR drug_b_id = ?
-        """,
-        (drug_id, drug_id),
-    ).fetchone()
-=======
 def drug_avg_strength(conn: sqlite3.Connection, drug_id: str, regime_ids: list[str] | None = None) -> float | None:
     if regime_ids is not None:
         other_ids = [rid for rid in regime_ids if rid != drug_id]
@@ -513,7 +472,6 @@ def drug_avg_strength(conn: sqlite3.Connection, drug_id: str, regime_ids: list[s
             """,
             (drug_num, drug_num),
         ).fetchone()
->>>>>>> Stashed changes
     return row["avg_s"]
 
 
@@ -531,26 +489,6 @@ def pair_has_interaction(conn: sqlite3.Connection, id_a: str, id_b: str) -> bool
 
 
 def resolve_drug(conn: sqlite3.Connection, query: str) -> dict | None:
-<<<<<<< Updated upstream
-    row = conn.execute(
-        """
-        SELECT drug_a_id AS id, drug_a_name AS name FROM interactions
-        WHERE LOWER(drug_a_id) = LOWER(?) OR LOWER(drug_a_name) = LOWER(?)
-        LIMIT 1
-        """,
-        (query, query),
-    ).fetchone()
-    if row:
-        return dict(row)
-    row = conn.execute(
-        """
-        SELECT drug_b_id AS id, drug_b_name AS name FROM interactions
-        WHERE LOWER(drug_b_id) = LOWER(?) OR LOWER(drug_b_name) = LOWER(?)
-        LIMIT 1
-        """,
-        (query, query),
-    ).fetchone()
-=======
     num: int | None = None
     if query.upper().startswith("DDINTER"):
         try:
@@ -590,7 +528,6 @@ def resolve_drug(conn: sqlite3.Connection, query: str) -> dict | None:
                 """,
                 (query,),
             ).fetchone()
->>>>>>> Stashed changes
     return dict(row) if row else None
 
 
@@ -820,10 +757,7 @@ class PairScore(BaseModel):
     drug_b_id:   str
     drug_b_name: str
     score:       float | None
-<<<<<<< Updated upstream
-=======
     mechanism:   str | None
->>>>>>> Stashed changes
 
 
 class ReplacementCandidate(BaseModel):
@@ -834,25 +768,15 @@ class ReplacementCandidate(BaseModel):
 
 
 class DrugReplacements(BaseModel):
-<<<<<<< Updated upstream
-    drug_id:      str
-    drug_name:    str
-    replacements: list[ReplacementCandidate]   # sorted by interaction_count desc
-=======
     drug_id:                    str
     drug_name:                  str
     original_interaction_count: int
     replacements:               list[ReplacementCandidate]
->>>>>>> Stashed changes
 
 
 class FoodInteraction(BaseModel):
     food_name:   str
-<<<<<<< Updated upstream
-    severity:    int     # 1 (lowest) – 5 (highest)
-=======
     severity:    int
->>>>>>> Stashed changes
     description: str
     management:  str
     mechanism:   str
@@ -861,43 +785,18 @@ class FoodInteraction(BaseModel):
 class DrugFoodInteractions(BaseModel):
     drug_id:   str
     drug_name: str
-<<<<<<< Updated upstream
-    foods:     list[FoodInteraction]   # sorted by severity desc
-=======
     foods:     list[FoodInteraction]
->>>>>>> Stashed changes
 
 
 class DiseaseInteraction(BaseModel):
     disease_name: str
-<<<<<<< Updated upstream
-    severity:     int     # 1 (lowest) – 5 (highest)
-=======
     severity:     int
->>>>>>> Stashed changes
     text:         str
 
 
 class DrugDiseaseInteractions(BaseModel):
     drug_id:   str
     drug_name: str
-<<<<<<< Updated upstream
-    diseases:  list[DiseaseInteraction]   # sorted by severity desc
-
-
-class RegimeResponse(BaseModel):
-    drugs: list[DrugRisk]
-    total_risk: float
-    normalized_risk: float
-    populated_edges: int
-    possible_edges: int
-    coverage_pct: float
-    unknown_drugs: list[str]
-    pair_scores: list[PairScore]
-    similar_replacements: list[DrugReplacements]   # ← new
-    food_interactions: list[DrugFoodInteractions]  # ← new
-    disease_interactions: list[DrugDiseaseInteractions]  # ← new
-=======
     diseases:  list[DiseaseInteraction]
 
 
@@ -913,7 +812,6 @@ class RegimeResponse(BaseModel):
     similar_replacements: list[DrugReplacements]
     food_interactions:    list[DrugFoodInteractions]
     disease_interactions: list[DrugDiseaseInteractions]
->>>>>>> Stashed changes
 
 
 # ---------------------------------------------------------------------------
@@ -990,14 +888,6 @@ def regime_risk(req: RegimeRequest):
         similar_replacements: list[DrugReplacements] = []
         for drug in resolved:
             candidates = find_similar_replacements(conn, drug["id"], regime_set)
-<<<<<<< Updated upstream
-            similar_replacements.append(DrugReplacements(
-                drug_id=drug["id"],
-                drug_name=drug["name"],
-                replacements=[
-                    ReplacementCandidate(**c) for c in candidates
-                ],
-=======
             drug_num = _id_to_num(drug["id"])
             orig_count_row = conn.execute(
                 "SELECT COUNT(*) AS cnt FROM interactions WHERE drug_a_num = ? OR drug_b_num = ?",
@@ -1027,7 +917,6 @@ def regime_risk(req: RegimeRequest):
                 drug_id=drug["id"],
                 drug_name=drug["name"],
                 diseases=[DiseaseInteraction(**d) for d in diseases],
->>>>>>> Stashed changes
             ))
 
         # Drug-food interaction warnings
