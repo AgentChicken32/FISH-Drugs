@@ -1,40 +1,50 @@
-# Drug Interaction Risk Scorer
+# Drug Interaction Risk Scorer (FISH-Drugs)
 
 ## Project Structure
 
 ```
-drug-risk/
+FISH-Drugs/
 ├── backend/
-│   ├── main.py            # FastAPI app
-│   ├── requirements.txt
-│   ├── interactions.csv   # ← drug-drug interaction CSV (or set DRUG_CSV env var)
-│   ├── drug_food.csv      # ← drug-food interaction CSV (or set FOOD_CSV env var)
-│   └── drug_disease.csv   # ← drug-disease interaction CSV (or set DISEASE_CSV env var)
+│   ├── main.py              # FastAPI app
+│   ├── interactions.csv     # Drug interaction data (put your CSV here)
+│   ├── interactions.db      # SQLite DB rebuilt from CSV on every start
+│   └── requirements.txt
 └── frontend/
-    └── App.jsx            # React frontend
+    └── src/
+        └── App.jsx          # Single-file React frontend (Vite project)
 ```
 
 ---
 
 ## CSV Format
 
-### Drug-drug interactions
-
-Each row must have **5 columns** (header row is auto-detected and skipped):
+Each row must have at least **5 columns**. A 7-column format is also supported (header row is auto-detected and skipped):
 
 ```
-drug_a_id, drug_a_name, drug_b_id, drug_b_name, interaction_strength
+drug_a_id, drug_a_name, drug_b_id, drug_b_name, interaction_strength [, mechanism [, category]]
 ```
+
+| Column | Field | Notes |
+|--------|-------|-------|
+| 1 | `drug_a_id` | Unique drug identifier |
+| 2 | `drug_a_name` | Display name |
+| 3 | `drug_b_id` | Unique drug identifier |
+| 4 | `drug_b_name` | Display name |
+| 5 | `interaction_strength` | Numeric value (any consistent scale) |
+| 6 | `mechanism` | Short text describing the mechanism (e.g. `Absorption`, `Metabolism`, `Synergy`). Use `Unknown` when unknown — this value is treated as absent. |
+| 7 | `category` | Ignored (reserved for future use) |
 
 Example:
 ```
-D001,Warfarin,D002,Aspirin,0.85
-D001,Warfarin,D003,Ibuprofen,0.72
+DDInter001,Warfarin,DDInter002,Aspirin,0.85,Synergy,Blood
+DDInter001,Warfarin,DDInter003,Ibuprofen,0.72,Unknown,Blood
 ```
 
-- `interaction_strength` is a numeric value (any scale you use consistently).
+**Parsing rules:**
 - Rows with non-numeric strength or fewer than 5 columns are silently skipped.
-- The DB is **rebuilt from the CSV on every server start**.
+- Mechanism values that are `Unknown`, blank, or purely numeric (malformed rows) are stored as `NULL`.
+- Column 7 (category) is parsed but not stored or used.
+- The DB is **fully rebuilt from the CSV on every server start**, so any change to the CSV takes effect on the next restart.
 
 ### Drug-food interactions
 
@@ -76,59 +86,63 @@ Severity level, Disease name, Text, drug_id
 cd backend
 pip install -r requirements.txt
 
-# Put your CSVs in backend/, OR set env vars:
-export DRUG_CSV=/path/to/your/interactions.csv
-export FOOD_CSV=/path/to/your/drug_food.csv
+# Optional: point to a different CSV or DB location
+export DRUG_CSV=/path/to/interactions.csv   # default: interactions.csv
+export DRUG_DB=/path/to/interactions.db     # default: interactions.db
+export SIM_CUTOFF=0.90                      # similarity threshold (default 0.90)
 
 uvicorn main:app --reload --port 8000
 ```
 
-The server will print how many interactions and food interactions were
-loaded, then be ready at `http://localhost:8000`.
+On startup the server will:
+1. Drop and rebuild `interactions.db` from the CSV.
+2. Compute and persist pairwise Sørensen-Dice matching scores (skipped if already present).
+3. Print the interaction count and be ready at `http://localhost:8000`.
 
 ### API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Returns interaction count |
-| GET | `/search?q=warfarin` | Autocomplete drug search |
-| POST | `/regime/risk` | Calculate regime risk |
+| GET | `/health` | Returns DB interaction count |
+| GET | `/search?q=warfarin&limit=8` | Autocomplete drug search (min 2 chars) |
+| POST | `/regime/risk` | Full regime risk analysis |
 
 #### POST `/regime/risk`
 
 **Request:**
 ```json
-{ "drug_ids": ["D001", "D002", "D003"] }
+{ "drug_ids": ["DDInter001", "DDInter002", "DDInter003"] }
 ```
 Drug IDs **or** drug names are accepted (case-insensitive).
 
-**Response (abridged):**
+**Response (abbreviated):**
 ```json
 {
   "drugs": [
-    { "id": "D001", "name": "Warfarin", "avg_strength": 0.785, "risk": 0.785 },
-    { "id": "D002", "name": "Aspirin",  "avg_strength": 0.61,  "risk": 0.61  }
+    { "id": "DDInter001", "name": "Warfarin",  "avg_strength": 0.785, "risk": 0.785 },
+    { "id": "DDInter002", "name": "Aspirin",   "avg_strength": 0.610, "risk": 0.610 }
   ],
   "total_risk": 1.395,
-  "normalized_risk": 0.6975,
+  "normalized_risk": 0.698,
   "populated_edges": 1,
   "possible_edges": 1,
   "coverage_pct": 100.0,
   "unknown_drugs": [],
-  "pair_scores": [ ... ],
-  "similar_replacements": [ ... ],
-  "food_interactions": [
+  "pair_scores": [
     {
-      "drug_id": "D001",
+      "drug_a_id": "DDInter001", "drug_a_name": "Warfarin",
+      "drug_b_id": "DDInter002", "drug_b_name": "Aspirin",
+      "score": 0.72,
+      "mechanism": "Synergy"
+    }
+  ],
+  "similar_replacements": [
+    {
+      "drug_id": "DDInter001",
       "drug_name": "Warfarin",
-      "foods": [
-        {
-          "food_name": "leafy greens",
-          "severity": 3,
-          "description": "Vitamin K-rich foods can reduce the anticoagulant effect of warfarin",
-          "management": "Maintain consistent vitamin K intake; avoid sudden changes",
-          "mechanism": "Pharmacodynamic"
-        }
+      "original_interaction_count": 142,
+      "replacements": [
+        { "id": "DDInter099", "name": "Acenocoumarol", "score": 0.94, "interaction_count": 138 }
       ]
     }
   ]
@@ -139,11 +153,27 @@ Drug IDs **or** drug names are accepted (case-insensitive).
 
 ## Risk Model
 
-- **Drug risk** = average interaction strength of that drug across **all** its entries in the database (both as drug_a and drug_b).
-- **Regime risk** = sum of individual drug risks.
-- **Coverage** = % of unique drug pairs in the regime that have at least one recorded interaction entry.
+### Per-drug risk
+Each drug's risk score is the **average interaction strength with the other drugs currently in the regime** (not all interactions in the database). Drugs with no recorded interactions with any regime partner contribute `0` and are shown with `avg_strength: null`.
 
-Drugs with no entries in the database contribute **0** to regime risk and are flagged with `avg_strength: null`.
+### Regime risk
+The **Regime Risk** displayed in the UI is the average of all individual drug risk scores:
+
+```
+regime_risk = sum(drug risks) / number_of_drugs
+```
+
+### Coverage
+Coverage is the percentage of unique drug pairs in the regime that have at least one recorded interaction entry in the database.
+
+### Matching scores (similarity)
+Pairwise drug similarity uses the **Sørensen-Dice coefficient** over shared interaction neighbourhoods:
+
+```
+Score(A, B) = 2 × |neighbours(A) ∩ neighbours(B)| / (|neighbours(A)| + |neighbours(B)|)
+```
+
+Scores are precomputed for all drug pairs at startup and cached in `matching_scores` (persists across restarts). The "Similar Drug Replacements" section lists drugs outside the regime with a matching score ≥ the `SIM_CUTOFF` threshold (default 90%), sorted by total interaction count.
 
 ### Food interactions
 
@@ -166,18 +196,32 @@ known disease interactions return an empty `diseases` list.
 
 ## Frontend Setup
 
-The frontend is a single React JSX file (`frontend/App.jsx`). You can:
+The frontend is a Vite + React project located in `frontend/`. Dependencies are listed in `frontend/package.json`.
 
-1. Drop it into any Vite/CRA project, **or**
-2. Paste it directly into Claude's artifact runner for a live preview.
+```bash
+cd frontend
+npm install
+npm run dev        # dev server at http://localhost:5173
+npm run build      # production build → frontend/dist/
+```
 
-Set the `API_BASE` constant at the top of the file if your backend runs on a different port.
+Set `API_BASE` at the top of `src/App.jsx` if your backend runs on a different port.
+
+### UI Sections
+
+| Section | Description |
+|---------|-------------|
+| **Drug input bar** | Tag-style multi-drug selector with live autocomplete. Click outside or select a drug to close the dropdown. Backspace removes the last tag. |
+| **Regime Risk** | Summary cards: overall risk score, DB coverage %, and drug count. |
+| **Individual Drug Risk** | Per-drug risk bar (avg interaction strength with regime partners only). |
+| **Pairwise Matching Scores** | Sørensen-Dice similarity for each pair within the regime, plus the interaction mechanism where known. |
+| **Similar Drug Replacements** | For each regime drug, lists similar alternatives (score ≥ 90%) with their total interaction counts compared to the original drug's count. |
 
 ---
 
 ## Performance Notes
 
-- SQLite with indexes on both drug ID columns handles 200k+ rows in milliseconds for typical queries.
-- The DB file is written to `interactions.db` next to where you run the server (override with `DRUG_DB` env var).
+- SQLite with indexes on both drug ID columns handles 200 k+ rows in milliseconds for typical queries.
+- The matching-score precomputation is the slow step (O(n²) over all drugs) — it runs once at first startup and is skipped on subsequent restarts unless the DB is rebuilt.
 - For very large CSVs the build step batches inserts in chunks of 10,000 rows.
 - If you outgrow SQLite, swapping to PostgreSQL requires only changing the connection string and driver.

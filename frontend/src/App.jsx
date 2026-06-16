@@ -181,107 +181,11 @@ const css = `
   .repl-score-cell { text-align: right; white-space: nowrap; }
 
   .mech-badge {
-    display: inline-block; font-family: var(--mono); font-size: 0.65rem;
+    display: inline-block;
+    font-family: var(--mono); font-size: 0.65rem;
     background: #0d1a2e; border: 1px solid #1e3a5f;
-    color: var(--blue); border-radius: 4px; padding: 2px 7px; white-space: nowrap;
-  }
-
-  /* ---- Drug row with popup buttons ---- */
-  .drug-row-buttons {
-    display: flex; gap: 6px; align-items: center;
-  }
-  .btn-pill {
-    font-family: var(--mono); font-size: 0.62rem; font-weight: 500;
-    border: 1px solid; border-radius: 99px; padding: 2px 9px;
-    cursor: pointer; transition: all 0.15s; background: transparent;
+    color: var(--blue); border-radius: 4px; padding: 2px 7px;
     white-space: nowrap;
-  }
-  .btn-pill.food {
-    color: var(--warn); border-color: #7a4512;
-  }
-  .btn-pill.food:hover, .btn-pill.food.active {
-    background: #2a1a08; border-color: var(--warn);
-  }
-  .btn-pill.disease {
-    color: var(--purple); border-color: #5a2a7a;
-  }
-  .btn-pill.disease:hover, .btn-pill.disease.active {
-    background: #1e0f2e; border-color: var(--purple);
-  }
-  .btn-pill.none-badge {
-    color: var(--muted); border-color: var(--border); cursor: default; opacity: 0.5;
-  }
-
-  /* ---- Modal / popup overlay ---- */
-  .modal-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 500; animation: fadeIn 0.15s ease;
-    padding: 24px;
-  }
-  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-  .modal {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 10px; width: 100%; max-width: 620px;
-    max-height: 80vh; display: flex; flex-direction: column;
-    box-shadow: 0 24px 80px rgba(0,0,0,0.7);
-    animation: slideUp 0.2s ease;
-  }
-  @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
-  .modal-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 20px; border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .modal-title { display: flex; align-items: center; gap: 10px; }
-  .modal-title h3 { font-size: 0.95rem; font-weight: 700; color: var(--text); }
-  .modal-title .modal-drug-id {
-    font-family: var(--mono); font-size: 0.68rem; color: var(--muted);
-    background: var(--border); border-radius: 3px; padding: 2px 6px;
-  }
-  .modal-close {
-    background: none; border: none; color: var(--muted); font-size: 1.2rem;
-    cursor: pointer; line-height: 1; padding: 4px; transition: color 0.1s;
-  }
-  .modal-close:hover { color: var(--text); }
-
-  .modal-body {
-    overflow-y: auto; flex: 1; padding: 0;
-  }
-
-  /* Food items inside modal */
-  .modal-food-item {
-    padding: 14px 20px; border-bottom: 1px solid var(--border);
-  }
-  .modal-food-item:last-child { border-bottom: none; }
-  .modal-item-header {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 10px; margin-bottom: 6px;
-  }
-  .modal-item-name { font-weight: 600; font-size: 0.9rem; text-transform: capitalize; }
-  .severity-badge {
-    font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.04em;
-    border: 1px solid currentColor; border-radius: 99px; padding: 2px 8px; white-space: nowrap;
-  }
-  .modal-item-desc { font-size: 0.8rem; color: var(--subtext); line-height: 1.5; margin-bottom: 5px; }
-  .modal-item-mgmt { font-size: 0.8rem; color: var(--text); line-height: 1.5; }
-  .modal-item-mgmt strong {
-    color: var(--blue); font-weight: 600; text-transform: uppercase;
-    font-size: 0.65rem; letter-spacing: 0.06em; margin-right: 6px;
-  }
-
-  /* Disease items inside modal */
-  .modal-disease-item {
-    padding: 14px 20px; border-bottom: 1px solid var(--border);
-  }
-  .modal-disease-item:last-child { border-bottom: none; }
-  .modal-disease-text { font-size: 0.8rem; color: var(--subtext); line-height: 1.55; }
-
-  .modal-empty {
-    padding: 32px 20px; font-family: var(--mono); font-size: 0.8rem;
-    color: var(--muted); text-align: center; font-style: italic;
   }
 
   .unknown-box {
@@ -400,19 +304,20 @@ export default function App() {
   const [error, setError]         = useState(null);
   const [online, setOnline]       = useState(null);
   const [dbCount, setDbCount]     = useState(null);
-
-  // Modal state: { drug: {id, name}, type: 'food'|'disease' } or null
-  const [modal, setModal] = useState(null);
-
-  const inputRef     = useRef(null);
+  const inputRef = useRef(null);
   const inputAreaRef = useRef(null);
-  const debouncedQ   = useDebounce(query, 200);
+  const debouncedQ = useDebounce(query, 200);
 
   useEffect(() => {
-    fetch(`${API_BASE}/health`)
-      .then(r => r.json())
-      .then(d => { setOnline(true); setDbCount(d.interactions); })
-      .catch(() => setOnline(false));
+    let cancelled = false;
+    const check = () => {
+      fetch(`${API_BASE}/health`)
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(d => { if (!cancelled) { setOnline(true); setDbCount(d.interactions); } })
+        .catch(() => { if (!cancelled) { setOnline(false); setTimeout(check, 3000); } });
+    };
+    check();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -458,6 +363,7 @@ export default function App() {
     finally { setLoading(false); }
   };
 
+  // Close dropdown when clicking outside the input area
   useEffect(() => {
     const handleMouseDown = (e) => {
       if (inputAreaRef.current && !inputAreaRef.current.contains(e.target)) {
@@ -468,7 +374,7 @@ export default function App() {
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, []);
 
-  const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); setModal(null); };
+  const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); };
 
   const maxRisk = result ? Math.max(...result.drugs.map(d => d.risk), 0.001) : 1;
 
@@ -494,7 +400,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="input-area" onClick={() => inputRef.current?.focus()}>
+        <div className="input-area" ref={inputAreaRef} onClick={() => inputRef.current?.focus()}>
           {drugs.map(d => (
             <span key={d.id} className="tag">
               {d.name}
@@ -621,7 +527,7 @@ export default function App() {
                 <p className="section-title">Pairwise Matching Scores</p>
                 <table className="data-table">
                   <thead>
-                    <tr><th>Drug Pair</th><th className="right">Matching Score</th></tr>
+                    <tr><th>Drug Pair</th><th>Mechanism</th><th className="right">Matching Score</th></tr>
                   </thead>
                   <tbody>
                     {result.pair_scores.map((ps, i) => {
@@ -635,6 +541,11 @@ export default function App() {
                               <span className="pair-sep">↔</span>
                               <span>{ps.drug_b_name}</span>
                             </div>
+                          </td>
+                          <td>
+                            {ps.mechanism
+                              ? <span className="mech-badge">{ps.mechanism}</span>
+                              : <span className="no-data">—</span>}
                           </td>
                           <td className="repl-score-cell">
                             {s !== null ? (
@@ -754,7 +665,7 @@ export default function App() {
                             <tr>
                               <th>Replacement Drug</th>
                               <th>ID</th>
-                              <th className="right">Total Interactions</th>
+                              <th className="right">Interactions (original: {group.original_interaction_count.toLocaleString()})</th>
                               <th className="right">Match Score</th>
                             </tr>
                           </thead>
