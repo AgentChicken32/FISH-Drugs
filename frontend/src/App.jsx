@@ -116,6 +116,30 @@ const css = `
     font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em;
     color: var(--muted); margin: 28px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
   }
+  .section-title-btn {
+    background: none; border: none; cursor: pointer; font: inherit; color: inherit;
+    letter-spacing: inherit; text-transform: inherit; padding: 0;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: color 0.15s;
+  }
+  .section-title-btn:hover { color: var(--text); }
+  .section-title-btn .legend-caret { font-size: 0.6rem; opacity: 0.6; }
+
+  .risk-legend {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    margin-bottom: 14px; overflow: hidden;
+    animation: fadeUp 0.15s ease;
+  }
+  .risk-legend-row {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+  }
+  .risk-legend-row:last-child { border-bottom: none; }
+  .risk-legend-score {
+    font-family: var(--mono); font-size: 0.9rem; font-weight: 600;
+    min-width: 18px; flex-shrink: 0; line-height: 1.4;
+  }
+  .risk-legend-label { font-size: 0.8rem; color: var(--subtext); line-height: 1.4; }
 
   .data-table { width: 100%; border-collapse: collapse; }
   .data-table th {
@@ -305,7 +329,7 @@ const css = `
 
 function riskColor(val, max) {
   const r = max > 0 ? val / max : 0;
-  return r < 0.33 ? "#4ade80" : r < 0.66 ? "#fb923c" : "#f87171";
+  return r < 0.33 ? "#facc15" : r < 0.66 ? "#fb923c" : "#f87171";
 }
 
 function scoreColor(s) {
@@ -315,7 +339,7 @@ function scoreColor(s) {
 function severityColor(sev) {
   if (sev >= 4) return "#f87171";
   if (sev >= 3) return "#fb923c";
-  return "#4ade80";
+  return "#facc15";
 }
 
 function useDebounce(value, delay) {
@@ -400,6 +424,7 @@ export default function App() {
   const [error, setError]         = useState(null);
   const [online, setOnline]       = useState(null);
   const [dbCount, setDbCount]     = useState(null);
+  const [showLegend, setShowLegend] = useState(false);
 
   // Modal state: { drug: {id, name}, type: 'food'|'disease' } or null
   const [modal, setModal] = useState(null);
@@ -475,7 +500,8 @@ export default function App() {
 
   const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); setModal(null); };
 
-  const maxRisk = result ? Math.max(...result.drugs.map(d => d.risk), 0.001) : 1;
+  const maxRisk = 5;
+  //result ? Math.max(...result.drugs.map(d => d.risk), 0.001) : 1;
 
   // Build lookup maps from result for modal
   const foodMap    = result ? Object.fromEntries(result.food_interactions?.map(g => [g.drug_id, g]) ?? []) : {};
@@ -548,7 +574,7 @@ export default function App() {
             <div className="score-banner">
               <div className="score-card primary">
                 <label>Regime Risk</label>
-                <div className="value">{result.normalized_risk.toFixed(3)}</div>
+                <div className="value" style={{ color: riskColor(result.normalized_risk, 1) }}>{result.normalized_risk.toFixed(3)}</div>
                 <div className="sub">avg drug risk · {result.drugs.length} drugs</div>
               </div>
               <div className="score-card">
@@ -564,7 +590,28 @@ export default function App() {
             </div>
 
             {/* Individual drug risk with food/disease buttons */}
-            <p className="section-title">Individual Drug Risk</p>
+            <p className="section-title">
+              <button className="section-title-btn" onClick={() => setShowLegend(v => !v)} title="Click to toggle risk score legend">
+                Individual Drug Risk
+                <span className="legend-caret">{showLegend ? "▼" : "▶"}</span>
+              </button>
+            </p>
+            {showLegend && (
+              <div className="risk-legend">
+                {[
+                  { score: 1, color: "#facc15", label: "Minor interaction — typically manageable, unlikely to require intervention." },
+                  { score: 2, color: "#f59e0b", label: "Moderate interaction — may require dose adjustment or monitoring." },
+                  { score: 3, color: "#fb923c", label: "Severe interaction — significant risk; some patients may require hospitalization." },
+                  { score: 4, color: "#f55846", label: "High risk — likely hospitalization; possible fatal outcome." },
+                  { score: 5, color: "#ef4444", label: "Critical — near-certain hospitalization and high risk of death." },
+                ].map(({ score, color, label }) => (
+                  <div key={score} className="risk-legend-row">
+                    <span className="risk-legend-score" style={{ color }}>{score}</span>
+                    <span className="risk-legend-label">{label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <table className="data-table">
               <thead>
                 <tr>
@@ -619,50 +666,6 @@ export default function App() {
                 })}
               </tbody>
             </table>
-
-            {/* Pairwise matching scores */}
-            {result.pair_scores?.length > 0 && (
-              <>
-                <p className="section-title">Pairwise Matching Scores</p>
-                <table className="data-table">
-                  <thead>
-                    <tr><th>Drug Pair</th><th>Mechanism</th><th className="right">Matching Score</th></tr>
-                  </thead>
-                  <tbody>
-                    {result.pair_scores.map((ps, i) => {
-                      const s = ps.score;
-                      const color = s !== null ? scoreColor(s) : "var(--muted)";
-                      return (
-                        <tr key={i}>
-                          <td>
-                            <div className="pair-names">
-                              <span>{ps.drug_a_name}</span>
-                              <span className="pair-sep">↔</span>
-                              <span>{ps.drug_b_name}</span>
-                            </div>
-                          </td>
-                          <td>
-                            {ps.mechanism
-                              ? <span className="mech-badge">{ps.mechanism}</span>
-                              : <span className="no-data">—</span>}
-                          </td>
-                          <td className="repl-score-cell">
-                            {s !== null ? (
-                              <div className="bar-wrap">
-                                <div className="bar">
-                                  <div className="bar-fill" style={{ width: `${s * 100}%`, background: color }} />
-                                </div>
-                                <span className="bar-label" style={{ color }}>{(s * 100).toFixed(1)}%</span>
-                              </div>
-                            ) : <span className="no-data">no data</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </>
-            )}
 
             {/* Similar replacement suggestions */}
             {result.similar_replacements?.length > 0 && (
