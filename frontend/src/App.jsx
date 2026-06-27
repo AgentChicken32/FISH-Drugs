@@ -500,7 +500,7 @@ export default function App() {
 
   const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); setModal(null); };
 
-  const maxRisk = 5;
+  const maxRisk = 3;
   //result ? Math.max(...result.drugs.map(d => d.risk), 0.001) : 1;
 
   // Build lookup maps from result for modal
@@ -515,8 +515,8 @@ export default function App() {
       <style>{css}</style>
       <div className="app">
         <div className="header">
-          <h1>Drug Regime<br /><span>Risk Scorer</span></h1>
-          <p>Add drugs to a regime and assess interaction risk</p>
+          <h1>Drug Regime<br /><span>Risk Evaluation</span></h1>
+          <p>Assess drug-drug interaction risks and possible replacements</p>
           <div className="header-status">
             <span className={`dot${online ? " online" : ""}`} />
             {online === null ? "connecting…"
@@ -555,7 +555,7 @@ export default function App() {
 
         <div className="actions">
           <button className="btn btn-primary" onClick={calculate} disabled={!drugs.length || loading}>
-            {loading ? "Calculating…" : "Calculate Risk"}
+            {loading ? "Just a moment…" : "Evaluate Risk"}
           </button>
           {(drugs.length > 0 || result) && <button className="btn btn-ghost" onClick={clear}>Clear</button>}
           <span className="hint">
@@ -580,12 +580,12 @@ export default function App() {
               <div className="score-card">
                 <label>DB Coverage</label>
                 <div className={`value${result.coverage_pct < 30 ? " warn" : ""}`}>{result.coverage_pct}%</div>
-                <div className="sub">{result.populated_edges} / {result.possible_edges} pairs</div>
+                <div className="sub">{result.populated_edges} / {result.possible_edges} pairs known</div>
               </div>
               <div className="score-card">
                 <label>Drugs Scored</label>
                 <div className="value">{result.drugs.length}</div>
-                <div className="sub">{result.unknown_drugs.length} unrecognised</div>
+                <div className="sub">{result.unknown_drugs.length} unrecognized</div>
               </div>
             </div>
 
