@@ -24,14 +24,57 @@ const css = `
     --sans:     'Syne', sans-serif;
   }
 
-  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+  body.light {
+    --bg:       #f4f6f9;
+    --surface:  #ffffff;
+    --border:   #d1d5db;
+    --accent:   #16a34a;
+    --blue:     #2563eb;
+    --warn:     #ea580c;
+    --danger:   #dc2626;
+    --purple:   #9333ea;
+    --muted:    #6b7280;
+    --text:     #111827;
+    --subtext:  #4b5563;
+  }
+  body.light .header h1 { color: #111827; }
+  body.light .dropdown { background: #ffffff; }
+  body.light .data-table tr:hover td { background: #f9fafb; }
+  body.light .repl-table tr:hover td { background: #f9fafb; }
+  body.light .replacement-group-header { background: #f3f4f6; }
+  body.light .repl-table th { background: #f3f4f6; }
+  body.light .score-card.primary { background: #f0fdf4; }
+  body.light .modal { background: #ffffff; }
+  body.light .modal-header { background: #ffffff; }
+
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; transition: background 0.2s, color 0.2s; }
 
   .app { max-width: 860px; margin: 0 auto; padding: 48px 24px 80px; }
 
-  .header { margin-bottom: 48px; }
+  .header { margin-bottom: 48px; position: relative; }
   .header h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: #fff; }
   .header h1 span { color: var(--accent); }
   .header p { margin-top: 8px; color: var(--subtext); font-size: 0.875rem; font-family: var(--mono); }
+
+  .theme-toggle {
+    position: absolute; top: 0; right: 0;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 99px;
+    padding: 6px 14px; cursor: pointer; font-family: var(--mono); font-size: 0.72rem;
+    color: var(--muted); display: inline-flex; align-items: center; gap: 7px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .theme-toggle:hover { border-color: var(--muted); color: var(--text); }
+  .theme-toggle .toggle-track {
+    width: 28px; height: 16px; border-radius: 8px; background: var(--border);
+    position: relative; transition: background 0.2s; flex-shrink: 0;
+  }
+  .theme-toggle.light-on .toggle-track { background: var(--accent); }
+  .theme-toggle .toggle-thumb {
+    position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; border-radius: 50%; background: var(--muted);
+    transition: transform 0.2s, background 0.2s;
+  }
+  .theme-toggle.light-on .toggle-thumb { transform: translateX(12px); background: #fff; }
   .header-status {
     display: inline-flex; align-items: center; gap: 6px;
     font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
@@ -181,7 +224,7 @@ const css = `
   }
   .replacement-group-header .count-badge {
     margin-left: auto; font-family: var(--mono); font-size: 0.68rem;
-    color: var(--blue); background: #0d1a2e; border: 1px solid #1e3a5f;
+    color: var(--blue); background: "transparent"; border: 1px solid #1e3a5f;
     border-radius: 99px; padding: 2px 8px;
   }
   .no-replacements {
@@ -425,6 +468,8 @@ export default function App() {
   const [online, setOnline]       = useState(null);
   const [dbCount, setDbCount]     = useState(null);
   const [showLegend, setShowLegend] = useState(false);
+  // Change false → true here to default to light mode
+  const [darkMode, setDarkMode]   = useState(true);
 
   // Modal state: { drug: {id, name}, type: 'food'|'disease' } or null
   const [modal, setModal] = useState(null);
@@ -498,6 +543,10 @@ export default function App() {
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, []);
 
+  useEffect(() => {
+    document.body.classList.toggle("light", !darkMode);
+  }, [darkMode]);
+
   const clear = () => { setDrugs([]); setResult(null); setError(null); setQuery(""); setModal(null); };
 
   const maxRisk = 3;
@@ -515,6 +564,15 @@ export default function App() {
       <style>{css}</style>
       <div className="app">
         <div className="header">
+          <button
+            className={`theme-toggle${darkMode ? "" : " light-on"}`}
+            onClick={() => setDarkMode(v => !v)}
+            aria-label="Toggle light/dark mode"
+          >
+            {darkMode ? "☾" : "☀"}
+            <span className="toggle-track"><span className="toggle-thumb" /></span>
+            {darkMode ? "Dark" : "Light"}
+          </button>
           <h1>Drug Regime<br /><span>Risk Evaluation</span></h1>
           <p>Assess drug-drug interaction risks and possible replacements</p>
           <div className="header-status">
